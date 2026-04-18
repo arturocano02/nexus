@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --amber: #FFBF00;
+  --cyan: #00DCFF;
+  --navy: #000033;
+  --secondary: #F5F5F5;
+  --font-jakarta: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-manrope: "Manrope", system-ui, sans-serif;
+}
+
+html, body {
+  background: var(--navy);
+  color: var(--secondary);
+  font-family: var(--font-manrope);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-jakarta);
+  letter-spacing: -0.01em;
+}
+
+/* Frosted glass surface used across overlays */
+.glass {
+  background: rgba(5, 5, 38, 0.55);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Base card */
+.card {
+  background: linear-gradient(180deg, rgba(20, 20, 102, 0.45), rgba(5, 5, 38, 0.7));
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 1.25rem;
+}
+
+/* Buttons */
+.btn-primary {
+  background: var(--amber);
+  color: #1a1200;
+  border-radius: 999px;
+  padding: 0.625rem 1.125rem;
+  font-weight: 600;
+  transition: transform 200ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms;
+  box-shadow: 0 10px 30px -10px rgba(255,191,0,0.55);
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 14px 40px -10px rgba(255,191,0,0.7); }
+.btn-primary:active { transform: translateY(0); }
+
+.btn-outline {
+  border: 1px solid rgba(255, 191, 0, 0.65);
+  color: var(--amber);
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  font-weight: 500;
+  background: transparent;
+  transition: background 200ms;
+}
+.btn-outline:hover { background: rgba(255,191,0,0.08); }
+
+.btn-ghost {
+  color: var(--secondary);
+  opacity: 0.85;
+  border-radius: 999px;
+  padding: 0.5rem 0.875rem;
+  transition: opacity 200ms, background 200ms;
+}
+.btn-ghost:hover { opacity: 1; background: rgba(255,255,255,0.04); }
+
+.btn-cyan {
+  background: var(--cyan);
+  color: #002027;
+  border-radius: 999px;
+  padding: 0.625rem 1.125rem;
+  font-weight: 600;
+  box-shadow: 0 10px 30px -10px rgba(0,220,255,0.6);
+  transition: transform 200ms, box-shadow 200ms;
+}
+.btn-cyan:hover { transform: translateY(-1px); box-shadow: 0 14px 40px -10px rgba(0,220,255,0.75); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 999px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Terminal surface used for manifesto */
+.terminal {
+  background: #000010;
+  color: #7CFFB7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Message bubbles — opaque so they read clearly over the 3D map */
+.msg-bubble {
+  border-radius: 1.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.msg-user {
+  background: rgba(5, 5, 50, 0.92);
+  color: rgba(245, 245, 245, 0.85);
+}
+.msg-nexus {
+  background: rgba(15, 12, 45, 0.94);
+  color: #FFBF00;
+  border-color: rgba(255, 191, 0, 0.12);
+}
+
+/* Subtle starfield background for canvases that need depth */
+.starfield::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,0.25), transparent 40%),
+    radial-gradient(1px 1px at 70% 60%, rgba(255,255,255,0.18), transparent 40%),
+    radial-gradient(1px 1px at 40% 80%, rgba(255,255,255,0.2), transparent 40%);
+  pointer-events: none;
+}
