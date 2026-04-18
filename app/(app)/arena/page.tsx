@@ -76,6 +76,13 @@ export default function ArenaPage() {
         setNodes((prev) => {
           if (payload.eventType === "INSERT") return [...prev, payload.new as PublicNode];
           if (payload.eventType === "UPDATE") return prev.map((n) => (n.id === (payload.new as any).id ? (payload.new as PublicNode) : n));
+          if (payload.eventType === "DELETE") {
+            // A merge pass just absorbed this node; drop its blob so the arena
+            // doesn't keep rendering an orphan with no arcs.
+            const deletedId = (payload.old as any)?.id;
+            if (!deletedId) return prev;
+            return prev.filter((n) => n.id !== deletedId);
+          }
           return prev;
         });
         refreshCounters();
