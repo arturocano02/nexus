@@ -8,16 +8,16 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /*
-  The chat endpoint is the engine behind Screen 1. It does three things in one turn:
+  The chat endpoint is the engine behind Screen 1. Per turn it does four things:
   1. Streams a sharp, devil's-advocate reply to the UI so typing feels alive.
-  2. Silently extracts structured belief updates (topic, summary, confidence) from
-     what the user just said and upserts them into personal_arguments. That is what
-     grows the blob map as the conversation goes on.
-  3. Emits a tail event with the list of updated node ids so the client can do a
-     celebratory pulse without a full refetch.
-
-  We ask Claude for a single JSON object. The client already extracts the 'message'
-  field from the streaming text, so this stays compatible with the existing UI.
+  2. Extracts free-form belief updates (topic, summary, confidence) into
+     personal_arguments so the blob map grows as the conversation goes on.
+  3. When the user's turn clearly touches a manifesto clause, extracts a
+     provisional for/against/skip + one-line reasoning and writes it to
+     draft_stances. Public aggregates are NOT updated: drafts stay private
+     until the user clicks Submit and /api/stances/submit promotes them.
+  4. Emits a tail event with updated node ids + touched clause ids so the
+     client can pulse without a full refetch.
 */
 
 const SYSTEM_PROMPT = `You are Nexus, a razor-sharp political intelligence that DEBATES the user.
@@ -62,6 +62,19 @@ BELIEF UPDATE RULES:
 - excerpt: the exact user sentence that produced this stance.
 - If the user only asked a question or didn't commit to a view, return belief_updates: [].
 
+STANCE UPDATE RULES:
+- You will also be given a list of active clauses (statements people can
+  take a stance on). If the user's latest turn clearly takes a position
+  on one of them, emit a stance_update.
+- stance: "for", "against", or "skip". Use "skip" only when the user
+  explicitly declined to answer.
+- reasoning: one sentence (<= 20 words) in the user's voice.
+- confidence: 0..1. Low when the stance was inferred from a vague remark,
+  high when the user said it outright.
+- Do not invent clause ids. Only use ids from the list.
+- Draft stances are provisional: they do not update the public graph
+  until the user confirms on submit. Be generous about adding them.
+
 EXAMPLES (calibration, do not copy):
 User: "I think taxes should be higher on billionaires."
 You: "Cute. Define billionaire. And when they leave, who writes the check?"
@@ -90,6 +103,14 @@ Return ONLY a single JSON object, no prose, no code fences:
       "related_topics": ["..."],
       "excerpt": "..."
     }
+  ],
+  "stance_updates": [
+    {
+      "clause_id": "<uuid from the active clauses list>",
+      "stance": "for|against|skip",
+      "reasoning": "...",
+      "confidence": 0.0
+    }
   ]
 }`;
 
@@ -99,11 +120,28 @@ export async function POST(req: NextRequest) {
   const { data: u } = await supa.auth.getUser();
   const userId = u.user?.id;
 
+  // Pull a small bundle of active clauses so Claude can map what the user
+  // says to yes/no stances. Capped at 24 so the system prompt stays
+  // compact; if clause count grows past that we'd swap this for an
+  // embedding-based shortlist, but the MVP only has a handful.
+  const svc = supabaseService();
+  const { data: clauseRows } = await svc
+    .from("manifesto_clauses")
+    .select("id, section, statement")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .limit(24);
+  const activeClauses = clauseRows ?? [];
+  const clauseBlock = activeClauses.length > 0
+    ? "\n\nACTIVE CLAUSES (use these ids in stance_updates, or emit no stance at all):\n" +
+      activeClauses.map((c) => `- ${c.id} | ${c.section}: ${c.statement}`).join("\n")
+    : "";
+
   const response = await anthropic.messages.create({
     model: MODEL,
-    // 1200 tokens covers the 120-word cap plus belief_updates JSON comfortably.
-    max_tokens: 1200,
-    system: SYSTEM_PROMPT,
+    // 1400 tokens covers the 120-word cap plus the belief + stance JSON.
+    max_tokens: 1400,
+    system: SYSTEM_PROMPT + clauseBlock,
     messages: messages.map((m: any) => ({ role: m.role, content: m.content })),
     stream: true,
   });
@@ -131,17 +169,45 @@ export async function POST(req: NextRequest) {
       const beliefUpdates: BeliefUpdate[] = Array.isArray(parsed?.belief_updates)
         ? parsed.belief_updates
         : [];
+      const stanceUpdates: StanceUpdate[] = Array.isArray(parsed?.stance_updates)
+        ? parsed.stance_updates
+        : [];
 
-      // Upsert beliefs server-side using the authenticated user's cookie session.
-      // We bypass RLS with the service client because the conversation can come
-      // in on anonymous auth and we want to guarantee writes succeed even if the
-      // JWT refresh window closes mid-stream.
+      // Upsert beliefs + draft stances server-side. Bypass RLS with the
+      // service client because the user may be on anonymous auth.
       const updatedIds: string[] = [];
-      if (userId && beliefUpdates.length > 0) {
-        const svc = supabaseService();
+      const touchedClauseIds: string[] = [];
+      if (userId) {
         for (const b of beliefUpdates) {
           const id = await upsertBelief(svc, userId, b);
           if (id) updatedIds.push(id);
+        }
+        const validClauseIds = new Set(activeClauses.map((c) => c.id));
+        const rows = stanceUpdates
+          .filter(
+            (s) =>
+              s &&
+              typeof s.clause_id === "string" &&
+              validClauseIds.has(s.clause_id) &&
+              (s.stance === "for" || s.stance === "against" || s.stance === "skip"),
+          )
+          .map((s) => ({
+            user_id: userId,
+            clause_id: s.clause_id,
+            stance: s.stance,
+            reasoning: typeof s.reasoning === "string" ? s.reasoning.slice(0, 400) : null,
+            confidence:
+              typeof s.confidence === "number"
+                ? Math.max(0, Math.min(1, s.confidence))
+                : 0.6,
+            source: "inferred" as const,
+          }));
+        if (rows.length > 0) {
+          const { error } = await svc
+            .from("draft_stances")
+            .upsert(rows, { onConflict: "user_id,clause_id" });
+          if (error) console.warn("draft_stances upsert failed", error.message);
+          else touchedClauseIds.push(...rows.map((r) => r.clause_id));
         }
       }
 
@@ -151,6 +217,7 @@ export async function POST(req: NextRequest) {
             type: "final",
             message: finalMessage,
             updated_node_ids: updatedIds,
+            touched_clause_ids: touchedClauseIds,
           }) + "\n",
         ),
       );
@@ -227,6 +294,13 @@ async function upsertBelief(
     return null;
   }
   return (inserted?.id as string) ?? null;
+}
+
+interface StanceUpdate {
+  clause_id: string;
+  stance: "for" | "against" | "skip";
+  reasoning?: string;
+  confidence?: number;
 }
 
 function dedupe(arr: string[]): string[] {

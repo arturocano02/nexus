@@ -74,9 +74,21 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json()) as { items: ReviewItem[]; anonymous: boolean };
   const items = (body.items ?? []).filter(i => i.include);
-  if (items.length === 0) return NextResponse.json({ inserted: 0 });
-
   const svc = supabaseService();
+
+  // Submitting also promotes any draft clause stances the user picked up
+  // during chat. This is the one place (outside the simulator) that moves
+  // manifesto_clauses aggregates.
+  const { data: promoted } = await svc.rpc("promote_draft_stances", {
+    p_user_id: u.user.id,
+    p_simulated: false,
+  });
+  const promotedStances = typeof promoted === "number" ? promoted : 0;
+
+  if (items.length === 0) {
+    return NextResponse.json({ inserted: 0, promoted_stances: promotedStances });
+  }
+
   let inserted = 0;
 
   const { count } = await svc.from("agents").select("*", { count: 'exact', head: true }).eq("user_id", u.user.id);
@@ -131,26 +143,35 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // CLAUDE-DRIVEN DISCOVERY (from lib/semantic.ts)
-    // No OpenAI embeddings anymore.
+    // Semantic discovery still runs so arcs can form between related nodes
+    // on the arena map. This is cheap and unrelated to the AI-vs-AI debate.
     processSemanticConnections(nodeId, 'public').catch(e => console.error("Discovery error:", e));
 
-    const candidates = await getTopDebateCandidates(u.user.id, cleanLabel, item.text, isFirstTime);
-
-    const origin = req.nextUrl.origin;
-    for (const cid of candidates) {
-      fetch(`${origin}/api/debate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-debate-secret": process.env.DEBATE_WEBHOOK_SECRET || ""
-        },
-        body: JSON.stringify({ public_node_id: cid }),
-      }).catch(e => console.error("Debate trigger fail:", e));
+    // AI-vs-AI debate is OFF by default. Consensus now comes from real user
+    // stances on manifesto clauses (see migration 0422/0423 and the
+    // /api/simulate, /api/stances/submit flows). Set ENABLE_AGENT_DEBATE=1
+    // in env to re-enable the old debate router for comparison experiments.
+    if (process.env.ENABLE_AGENT_DEBATE === "1") {
+      const candidates = await getTopDebateCandidates(u.user.id, cleanLabel, item.text, isFirstTime);
+      const origin = req.nextUrl.origin;
+      for (const cid of candidates) {
+        fetch(`${origin}/api/debate`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-debate-secret": process.env.DEBATE_WEBHOOK_SECRET || ""
+          },
+          body: JSON.stringify({ public_node_id: cid }),
+        }).catch(e => console.error("Debate trigger fail:", e));
+      }
     }
 
     inserted++;
   }
 
-  return NextResponse.json({ inserted, status: "success" });
+  return NextResponse.json({
+    inserted,
+    promoted_stances: promotedStances,
+    status: "success",
+  });
 }
