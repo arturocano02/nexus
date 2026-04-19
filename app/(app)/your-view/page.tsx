@@ -11,6 +11,7 @@ import NodeOverlay from "@/components/NodeOverlay";
 import SubmitReview from "@/components/SubmitReview";
 import LinkOverlay from "@/components/LinkOverlay";
 import HelpButton from "@/components/HelpButton";
+import ClausePromptCard, { ClausePromptData } from "@/components/ClausePrompt";
 import type { PersonalArgument, ChatMessage, Link as NodeLink } from "@/lib/types";
 
 const NodeMap = dynamic(() => import("@/components/NodeMap"), { ssr: false });
@@ -31,6 +32,11 @@ export default function YourViewPage() {
   const [submitting, setSubmitting] = useState(false);
   const [showHud, setShowHud] = useState(true);
   const [transitionPhase, setTransitionPhase] = useState<"idle" | "vortex" | "merge" | "done">("idle");
+  // Draft clause stances inferred from chat. Queued so we can surface them
+  // one card at a time under the latest assistant bubble. Confirmed cards
+  // drop out of the queue but stay in draft_stances until Submit promotes
+  // them into user_stances (see /api/stances/submit).
+  const [clausePrompts, setClausePrompts] = useState<ClausePromptData[]>([]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
@@ -97,6 +103,34 @@ export default function YourViewPage() {
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
     }
   }, [input, speech.interim]);
+
+  // Pulls current draft stances for the clauses Nexus just inferred on and
+  // stages them as cards. Deduped against whatever is already in the
+  // queue so the same clause never shows up twice in a row.
+  const enqueueClausePrompts = useCallback(async (clauseIds: string[]) => {
+    if (clauseIds.length === 0) return;
+    try {
+      const res = await fetch("/api/stances", { cache: "no-store" });
+      const body = await res.json();
+      const drafts: any[] = Array.isArray(body?.drafts) ? body.drafts : [];
+      const pending: ClausePromptData[] = drafts
+        .filter((d) => clauseIds.includes(d.clause_id) && d.clause)
+        .map((d) => ({
+          clause_id: d.clause_id,
+          statement: d.clause.statement,
+          section: d.clause.section,
+          inferred_stance: d.stance,
+          reasoning: d.reasoning,
+        }));
+      setClausePrompts((prev) => {
+        const existing = new Set(prev.map((p) => p.clause_id));
+        const next = pending.filter((p) => !existing.has(p.clause_id));
+        return [...prev, ...next];
+      });
+    } catch (err) {
+      console.warn("enqueueClausePrompts failed", err);
+    }
+  }, []);
 
   const fetchNodes = useCallback(async () => {
     if (!user) return;
@@ -176,6 +210,7 @@ export default function YourViewPage() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = ""; let finalMsg = ""; let finalNodeIds: string[] = [];
+    let touchedClauseIds: string[] = [];
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -190,9 +225,16 @@ export default function YourViewPage() {
           else if (evt.type === "final") {
             finalMsg = evt.message;
             finalNodeIds = Array.isArray(evt.updated_node_ids) ? evt.updated_node_ids : [];
+            touchedClauseIds = Array.isArray(evt.touched_clause_ids) ? evt.touched_clause_ids : [];
           }
         } catch { }
       }
+    }
+    // If the server inferred any clause stances this turn, enqueue a casual
+    // confirmation card. We read the draft back (rather than guessing) so
+    // the stance shown matches what got saved server-side.
+    if (touchedClauseIds.length > 0) {
+      enqueueClausePrompts(touchedClauseIds);
     }
     setStreamText("");
     setMessages((prev) => [...prev, { role: "assistant", content: finalMsg || "..." }]);
@@ -324,6 +366,16 @@ export default function YourViewPage() {
                           {m.content}
                         </div>
                       ))}
+
+                    {/* Casual yes/no prompt rides under the latest bubble.
+                        Resolving a card removes it from the queue; nothing
+                        public moves until the user hits Submit. */}
+                    <ClausePromptCard
+                      prompts={clausePrompts}
+                      onResolve={(id) =>
+                        setClausePrompts((prev) => prev.filter((p) => p.clause_id !== id))
+                      }
+                    />
                   </div>
                 </motion.div>
               )}
