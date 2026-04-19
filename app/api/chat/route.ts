@@ -95,7 +95,7 @@ Return ONLY a single JSON object, no prose, no code fences:
 
 export async function POST(req: NextRequest) {
   const { messages } = await req.json();
-  const supa = supabaseServer();
+  const supa = await supabaseServer();
   const { data: u } = await supa.auth.getUser();
   const userId = u.user?.id;
 

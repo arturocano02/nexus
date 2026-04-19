@@ -22,7 +22,7 @@ interface ReviewItem {
 }
 
 export async function GET() {
-  const supa = supabaseServer();
+  const supa = await supabaseServer();
   const { data: u } = await supa.auth.getUser();
   if (!u.user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
@@ -68,7 +68,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const supa = supabaseServer();
+  const supa = await supabaseServer();
   const { data: u } = await supa.auth.getUser();
   if (!u.user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
 
