@@ -1,89 +1,140 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { anthropic, MODEL } from "@/lib/anthropic";
 import { supabaseService } from "@/lib/supabase/service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /*
-  Read endpoint for the layered manifesto explorer:
-    Category (e.g. Immigration)
-      -> Section (e.g. Border and enforcement)
-         -> Clause (statement + agreement_pct + stance_count)
-            -> grouped for_arguments / against_arguments
+  GET  /api/manifesto
+    Returns agreed collective positions (tension_flag = 'agreed') with
+    their top arguments, organised by category.
 
-  Agreement numbers here are computed from real user_stances submissions
-  only. Mid-chat draft stances never touch these values.
+  POST /api/manifesto
+    Generates a political manifesto using Claude from agreed + strongly-leaning
+    collective positions. Returns { manifesto: string }.
 */
 
+// -----------------------------------------------------------------------
+// GET — raw agreed positions
+// -----------------------------------------------------------------------
 export async function GET() {
   const svc = supabaseService();
 
-  const { data: explorer, error: expErr } = await svc
-    .from("manifesto_explorer")
-    .select("*")
-    .order("category_sort", { ascending: true });
+  const { data: agreed } = await svc
+    .from("collective_scores")
+    .select("subtopic_id, category_id, yes_weighted_pct, no_weighted_pct, total_responses, top_yes_args, top_no_args")
+    .eq("tension_flag", "agreed")
+    .order("total_responses", { ascending: false });
 
-  if (expErr) {
-    return NextResponse.json({ error: "explorer_failed" }, { status: 500 });
+  if (!agreed || agreed.length === 0) {
+    return NextResponse.json({ sections: [], total: 0 });
   }
 
-  const clauseIds = (explorer ?? [])
-    .filter((r: any) => r.clause_id)
-    .map((r: any) => r.clause_id as string);
+  const categoryIds = [...new Set(agreed.map((r: any) => r.category_id).filter(Boolean))];
+  const subtopicIds = agreed.map((r: any) => r.subtopic_id);
 
-  const { data: args } = clauseIds.length > 0
-    ? await svc
-        .from("clause_arguments")
-        .select("clause_id, stance, reasoning, is_simulated, created_at")
-        .in("clause_id", clauseIds)
-        .order("created_at", { ascending: false })
-    : { data: [] };
+  const [catRes, subRes] = await Promise.all([
+    svc.from("taxonomy_categories").select("id, name").in("id", categoryIds),
+    svc.from("taxonomy_subtopics").select("id, name").in("id", subtopicIds),
+  ]);
 
-  const argsByClause = new Map<string, { for: string[]; against: string[] }>();
-  for (const a of args ?? []) {
-    if (!a.clause_id) continue;
-    const bucket = argsByClause.get(a.clause_id) ?? { for: [], against: [] };
-    if (a.stance === "for" && bucket.for.length < 5 && a.reasoning) bucket.for.push(a.reasoning);
-    if (a.stance === "against" && bucket.against.length < 5 && a.reasoning) bucket.against.push(a.reasoning);
-    argsByClause.set(a.clause_id, bucket);
-  }
+  const catMap = new Map((catRes.data ?? []).map((c: any) => [c.id, c.name]));
+  const subMap = new Map((subRes.data ?? []).map((s: any) => [s.id, s.name]));
 
-  const categories = new Map<string, any>();
-  for (const row of explorer ?? []) {
-    if (!row.category_id) continue;
-    const cat =
-      categories.get(row.category_id) ?? {
-        category_id: row.category_id,
-        slug: row.category_slug,
-        title: row.category_title,
-        blurb: row.category_blurb,
-        sections: new Map<string, any>(),
-      };
-    categories.set(row.category_id, cat);
-    if (!row.clause_id) continue;
-    const section =
-      cat.sections.get(row.section) ?? { section: row.section, clauses: [] };
-    const bucket = argsByClause.get(row.clause_id) ?? { for: [], against: [] };
-    section.clauses.push({
-      clause_id: row.clause_id,
-      statement: row.statement,
-      agreement_pct: Number(row.agreement_pct),
-      stance_count: row.stance_count,
-      for_arguments: bucket.for,
-      against_arguments: bucket.against,
-      for_argument_seed: row.for_argument,
-      against_argument_seed: row.against_argument,
+  const byCategory = new Map<string, any>();
+  for (const row of agreed) {
+    const catId = row.category_id ?? "unknown";
+    if (!byCategory.has(catId)) {
+      byCategory.set(catId, {
+        category_id: catId,
+        category_name: catMap.get(catId) ?? "Unknown",
+        positions: [],
+      });
+    }
+    byCategory.get(catId).positions.push({
+      subtopic_id: row.subtopic_id,
+      subtopic_name: subMap.get(row.subtopic_id) ?? "Unknown",
+      yes_pct: row.yes_weighted_pct,
+      no_pct: row.no_weighted_pct,
+      responses: row.total_responses,
+      top_yes_args: row.top_yes_args ?? [],
+      top_no_args: row.top_no_args ?? [],
     });
-    cat.sections.set(row.section, section);
   }
 
-  const result = Array.from(categories.values()).map((c) => ({
-    category_id: c.category_id,
-    slug: c.slug,
-    title: c.title,
-    blurb: c.blurb,
-    sections: Array.from(c.sections.values()),
-  }));
+  return NextResponse.json({
+    sections: Array.from(byCategory.values()),
+    total: agreed.length,
+  });
+}
 
-  return NextResponse.json({ categories: result });
+// -----------------------------------------------------------------------
+// POST — generate manifesto prose
+// -----------------------------------------------------------------------
+export async function POST(_req: NextRequest) {
+  const svc = supabaseService();
+
+  // Include agreed + contested-but-directional positions
+  const { data: positions } = await svc
+    .from("collective_scores")
+    .select("subtopic_id, category_id, yes_weighted_pct, no_weighted_pct, total_responses, top_yes_args, top_no_args, tension_flag")
+    .in("tension_flag", ["agreed", "contested"])
+    .order("total_responses", { ascending: false });
+
+  if (!positions || positions.length === 0) {
+    return NextResponse.json({ manifesto: null, reason: "no_data" });
+  }
+
+  const subtopicIds = positions.map((r: any) => r.subtopic_id);
+  const categoryIds = [...new Set(positions.map((r: any) => r.category_id).filter(Boolean))];
+
+  const [catRes, subRes] = await Promise.all([
+    svc.from("taxonomy_categories").select("id, name").in("id", categoryIds),
+    svc.from("taxonomy_subtopics").select("id, name").in("id", subtopicIds),
+  ]);
+
+  const catMap = new Map((catRes.data ?? []).map((c: any) => [c.id, c.name]));
+  const subMap = new Map((subRes.data ?? []).map((s: any) => [s.id, s.name]));
+
+  const sections = positions.map((row: any) => {
+    const direction = row.yes_weighted_pct >= 50 ? "YES" : "NO";
+    const strength = row.tension_flag === "agreed" ? "strong consensus" : "lean";
+    const topArgs: string[] = direction === "YES"
+      ? (row.top_yes_args ?? [])
+      : (row.top_no_args ?? []);
+    return [
+      `[${catMap.get(row.category_id) ?? "Unknown"} › ${subMap.get(row.subtopic_id) ?? "Unknown"}]`,
+      `Collective: ${direction} (${row.yes_weighted_pct}% yes, ${strength}, ${row.total_responses} responses)`,
+      topArgs.length > 0 ? `Key arguments: ${topArgs.slice(0, 2).join(" | ")}` : "",
+    ].filter(Boolean).join("\n");
+  }).join("\n\n");
+
+  const prompt = `You are drafting a collective political manifesto for a UK civic platform called Nexo.
+
+The following are collectively-agreed political positions derived from weighted deliberative conversations:
+
+${sections}
+
+Write a manifesto with these requirements:
+- One short preamble paragraph explaining what Nexo is and how this manifesto was produced (collective deliberation, not top-down policy)
+- Organised by policy area (use the category names above as section headings)
+- Each section has 2-4 concrete, specific policy commitments derived directly from the agreed positions
+- Where the collective leans YES, frame it as a commitment or pledge. Where they lean NO, frame it as a clear rejection or reform.
+- Ground each commitment in the key arguments (use them as rationale, don't quote verbatim)
+- Tone: direct, civic, confident — like a real UK party manifesto, not corporate speak
+- Total length: 450-650 words
+- Finish with a single bold closing sentence
+
+Write only the manifesto. No meta-commentary or headers outside the document itself.`;
+
+  const resp = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 1400,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const manifesto = resp.content.find((c) => c.type === "text")?.text ?? "";
+
+  return NextResponse.json({ manifesto, positions_used: positions.length });
 }

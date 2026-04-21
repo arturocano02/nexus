@@ -17,6 +17,8 @@ export interface MapNodeDatum {
   // Arena-only: 0..1 disagreement signal. Higher means the topic is
   // contested, which we use to jitter the blob more vigorously.
   tension?: number;
+  /** Override blob color directly (for arena green/amber/red coloring) */
+  hexColor?: string;
 }
 
 interface NodeMapProps {
@@ -27,6 +29,7 @@ interface NodeMapProps {
   onLinkAnimatedIn?: (linkId: string) => void; // called once per arc after fade-in
   emptyHint?: string;
   radius?: number;
+  cameraDistance?: number; // default 22 — lower brings blobs closer/larger
   physicsBoost?: boolean;
   highlightIds?: Set<string>; // nodes rendered with a warm "own" halo (arena)
   isArena?: boolean;
@@ -135,7 +138,10 @@ function ThoughtBlob({
     }
   });
 
-  const hexColor = useMemo(() => colorFromConviction(data.conviction, !data.isOwn), [data.conviction, data.isOwn]);
+  const hexColor = useMemo(
+    () => data.hexColor ?? colorFromConviction(data.conviction, !data.isOwn),
+    [data.hexColor, data.conviction, data.isOwn],
+  );
   const labelOffset = useMemo<[number, number, number]>(
     () => [0, targetRadius + 0.35, 0],
     [targetRadius],
@@ -532,6 +538,7 @@ export default function NodeMap({
   physicsBoost = false,
   highlightIds,
   isArena,
+  cameraDistance = 22,
 }: NodeMapProps) {
   const maxWeight = useMemo(
     () => nodes.reduce((m, n) => Math.max(m, n.weight), 1),
@@ -539,7 +546,7 @@ export default function NodeMap({
   );
   return (
     <div className="absolute inset-0 bg-[#080a18]">
-      <Canvas dpr={[1, 2]} camera={{ position: [0, 0, 22], fov: 45 }}>
+      <Canvas dpr={[1, 2]} camera={{ position: [0, 0, cameraDistance], fov: 50 }}>
         <fog attach="fog" args={["#080a18", 20, 60]} />
         <ambientLight intensity={0.35} />
         <pointLight position={[10, 10, 10]} intensity={1.4} color={CYAN} />
