@@ -33,15 +33,36 @@ export const dynamic = "force-dynamic";
   - Every turn (both assistant and user messages) is saved to public.messages.
 */
 
-const SYSTEM_PROMPT = (categoryName: string, _slug: string) => `You are a sharp, witty political sparring partner. Topic: ${categoryName}.
+function buildSystemPrompt(
+  categoryName: string,
+  subtopicGoals: string,
+  userTurnCount: number,
+  avgUserWords: number,
+): string {
+  // Calibrate response length to how much the user writes
+  const lengthRule =
+    avgUserWords <= 15
+      ? "User writes short. You write SHORT — 1 punchy sentence + 1 question. Max 30 words total."
+      : avgUserWords <= 50
+      ? "Match the user's length. 2 sentences max + 1 question."
+      : "User writes a lot. You can go up to 3 sentences + 1 question, but no more.";
 
-Hard limit: 2 sentences then one question. No longer.
+  const contradictionRule =
+    userTurnCount >= 4
+      ? "You have conversation history with this person. Look for contradictions with what they said earlier and call them out directly — 'But earlier you said X, now you're saying Y — which is it?'"
+      : "";
 
-Sentence 1 — their point in a few words, then immediately counter: "but critics point out..." / "the data says the opposite:" / "that breaks down when you consider..."
-Sentence 2 — the hardest specific counter-evidence or policy failure you can find. Name the actual policy, stat, or case. Make them work.
-Question — one short punchy follow-up. "How do you square that with X?" / "What's the answer to Y?"
+  return `You are a sharp political sparring partner. Topic: ${categoryName}.
 
-Be direct. Witty when possible. A little combative. Never moralize or fawn. Never reveal you're recording their views. ${categoryName} only — don't drift.`;
+${subtopicGoals ? `PRIVATE — your real job is to gather enough signal to confidently infer this person's stance on the following questions. Never ask them directly. Draw it out naturally through debate, pushback, and specific questions that force them to reveal their position:
+${subtopicGoals}
+
+` : ""}LENGTH: ${lengthRule}
+
+STYLE: Direct, a little combative, witty when possible. Name actual policies, stats, cases. Make them work for their position. Always end with one short punchy question.
+${contradictionRule ? `\nCONTRADICTIONS: ${contradictionRule}` : ""}
+Never moralize. Never fawn. Never reveal you're analysing their views. ${categoryName} only — don't drift.`;
+}
 
 export async function POST(req: NextRequest) {
   // Auth check
@@ -97,6 +118,47 @@ export async function POST(req: NextRequest) {
       );
     } catch { /* table not yet created — safe to skip */ }
   }
+
+  // Fetch subtopic goals — the questions the AI needs to extract views on.
+  // These go into the hidden section of the system prompt.
+  let subtopicGoals = "";
+  if (resolvedCategoryId) {
+    try {
+      const { data: subtopics } = await svc
+        .from("taxonomy_subtopics")
+        .select("id, name, latent_question_text")
+        .eq("category_id", resolvedCategoryId)
+        .eq("is_other", false)
+        .order("sort_order");
+
+      if (subtopics && subtopics.length > 0) {
+        // For each subtopic, use latent_question_text if set, else fall back to depth-1 question
+        const subIds = subtopics.map((s: any) => s.id);
+        const { data: questions } = await svc
+          .from("taxonomy_questions")
+          .select("subtopic_id, question_text")
+          .in("subtopic_id", subIds)
+          .eq("depth_layer", 1);
+
+        const qBySubtopic = new Map((questions ?? []).map((q: any) => [q.subtopic_id, q.question_text]));
+
+        subtopicGoals = subtopics
+          .map((s: any) => {
+            const q = s.latent_question_text ?? qBySubtopic.get(s.id) ?? s.name;
+            return `• ${s.name}: "${q}"`;
+          })
+          .join("\n");
+      }
+    } catch { /* taxonomy tables may not exist yet */ }
+  }
+
+  // Compute adaptive length hint from the last few user messages
+  const userMessages = messages.filter((m) => m.role === "user");
+  const avgUserWords =
+    userMessages.length > 0
+      ? userMessages.slice(-3).reduce((sum, m) => sum + m.content.split(/\s+/).length, 0) /
+        Math.min(3, userMessages.length)
+      : 20;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -161,8 +223,13 @@ export async function POST(req: NextRequest) {
         // (only the first token was reaching the client).
         const resp = await anthropic.messages.create({
           model: MODEL,
-          max_tokens: 512,
-          system: SYSTEM_PROMPT(categoryName, category_slug ?? "general"),
+          max_tokens: 300,
+          system: buildSystemPrompt(
+            categoryName,
+            subtopicGoals,
+            userMessages.length,
+            avgUserWords,
+          ),
           messages: anthropicMessages,
         });
 
@@ -317,30 +384,77 @@ Return ONLY a JSON array: [{"subtopic_id":"...","stance":"...","confidence":0.0,
     return;
   }
 
+  const now = new Date().toISOString();
+
   for (const inf of inferences) {
     if (!inf.subtopic_id || typeof inf.confidence !== "number") continue;
     const sub = namedSubtopics.find((s: { id: string }) => s.id === inf.subtopic_id);
     if (!sub) continue;
 
     const args = inf.key_argument
-      ? [{ text: inf.key_argument, ts: new Date().toISOString() }]
+      ? [{ text: inf.key_argument, ts: now }]
       : [];
 
-    try { await svc.from("inferred_positions").upsert(
-      {
-        user_id: payload.userId,
-        session_id: payload.sessionId,
-        category_id: payload.categoryId,
-        subtopic_id: inf.subtopic_id,
-        stance: ["yes", "no", "abstain", "unclear"].includes(inf.stance)
-          ? inf.stance
-          : "unclear",
-        confidence: Math.max(0, Math.min(1, inf.confidence)),
-        reasoning: inf.reasoning ?? null,
-        arguments_json: args,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id,session_id,subtopic_id" }
-    ); } catch { /* inferred_positions table not yet created */ }
+    // Upsert inferred_positions (raw session-level data)
+    try {
+      await svc.from("inferred_positions").upsert(
+        {
+          user_id: payload.userId,
+          session_id: payload.sessionId,
+          category_id: payload.categoryId,
+          subtopic_id: inf.subtopic_id,
+          stance: ["yes", "no", "abstain", "unclear"].includes(inf.stance) ? inf.stance : "unclear",
+          confidence: Math.max(0, Math.min(1, inf.confidence)),
+          reasoning: inf.reasoning ?? null,
+          arguments_json: args,
+          updated_at: now,
+        },
+        { onConflict: "user_id,session_id,subtopic_id" }
+      );
+    } catch { /* table not yet created */ }
+
+    // Upsert user_views — persistent, user-editable view keyed on user+topic
+    // Only upsert if this user has a profile row (authenticated users only)
+    if (inf.key_argument || inf.reasoning) {
+      try {
+        const { data: existingView } = await svc
+          .from("user_views")
+          .select("id, raw_excerpts, submitted_to_arena")
+          .eq("user_id", payload.userId)
+          .eq("topic_label", (sub as { name: string }).name)
+          .eq("is_deleted", false)
+          .maybeSingle();
+
+        if (existingView && existingView.submitted_to_arena) {
+          // Submitted views are read-only — skip update
+          continue;
+        }
+
+        const existingExcerpts: string[] = Array.isArray(existingView?.raw_excerpts)
+          ? existingView.raw_excerpts
+          : [];
+        const newExcerpt = inf.key_argument ?? inf.reasoning ?? "";
+        const raw_excerpts = newExcerpt
+          ? [...new Set([...existingExcerpts, newExcerpt])].slice(-20) // keep last 20
+          : existingExcerpts;
+
+        if (existingView) {
+          await svc.from("user_views").update({
+            summary: inf.reasoning ?? "",
+            confidence_score: Math.max(0, Math.min(1, inf.confidence)),
+            raw_excerpts,
+            updated_at: now,
+          }).eq("id", existingView.id);
+        } else {
+          await svc.from("user_views").insert({
+            user_id: payload.userId,
+            topic_label: (sub as { name: string }).name,
+            summary: inf.reasoning ?? "",
+            confidence_score: Math.max(0, Math.min(1, inf.confidence)),
+            raw_excerpts,
+          });
+        }
+      } catch { /* profiles table may not exist or user has no profile */ }
+    }
   }
 }

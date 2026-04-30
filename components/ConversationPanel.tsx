@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSpeech } from "@/lib/useSpeech";
+import { supabaseBrowser } from "@/lib/supabase/browser";
+import { useUser } from "@/lib/useUser";
 import type { TaxonomyCategory, ChatMessage } from "@/lib/types";
 
 interface ConversationPanelProps {
@@ -30,16 +32,19 @@ export default function ConversationPanel({
   onCloseWithReview,
   onCanReviewChange,
 }: ConversationPanelProps) {
+  const { user } = useUser();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [initiated, setInitiated] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const speech = useSpeech();
+  const supa = supabaseBrowser();
 
   const userTurns = messages.filter(m => m.role === "user").length;
   const canReview = userTurns >= MIN_TURNS_FOR_REVIEW;
@@ -59,28 +64,49 @@ export default function ConversationPanel({
     if (open && !streaming) setTimeout(() => inputRef.current?.focus(), 350);
   }, [open, streaming]);
 
-  // Reset when category changes
+  // Load persistent conversation history when category changes
   useEffect(() => {
+    if (!category?.id || !user) return;
     setMessages([]);
     setInitiated(false);
+    setHistoryLoaded(false);
     setInput("");
     setError(null);
     speech.stop();
-  }, [category?.id]);
 
-  // Auto-kick conversation when panel opens
-  useEffect(() => {
-    if (open && category && !initiated && messages.length === 0) {
-      setInitiated(true);
-      if (initialMessage) {
-        const userMsg: ChatMessage = { role: "user", content: initialMessage };
-        setMessages([userMsg]);
-        streamReply([userMsg], category);
-      } else {
-        streamReply([], category);
-      }
+    async function loadHistory() {
+      if (!category?.id || !user) return;
+      try {
+        const { data } = await supa
+          .from("messages")
+          .select("role, content")
+          .eq("user_id", user.id)
+          .eq("category_id", category.id)
+          .order("created_at", { ascending: true })
+          .limit(200);
+
+        if (data && data.length > 0) {
+          setMessages(data as ChatMessage[]);
+          setInitiated(true); // don't re-kick — history is already here
+        }
+      } catch { /* messages table may not exist yet */ }
+      setHistoryLoaded(true);
     }
-  }, [open, category, initiated, messages.length, initialMessage]);
+    loadHistory();
+  }, [category?.id, user?.id]);
+
+  // Auto-kick conversation once history check is done
+  useEffect(() => {
+    if (!open || !category || !historyLoaded || initiated) return;
+    setInitiated(true);
+    if (initialMessage) {
+      const userMsg: ChatMessage = { role: "user", content: initialMessage };
+      setMessages([userMsg]);
+      streamReply([userMsg], category);
+    } else {
+      streamReply([], category);
+    }
+  }, [open, category, historyLoaded, initiated]);
 
   // Merge speech transcript into input
   useEffect(() => {

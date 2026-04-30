@@ -94,6 +94,60 @@ Return ONLY JSON: { "specificity": 0.0, "consistency": 0.0 }`,
 }
 
 // -----------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------
+
+/** Converts a subtopic slug-name like "Labour Market" into a natural question
+ *  e.g. "Do you think immigration has a net negative effect on the labour market?" */
+function subtopicToQuestion(subtopicName: string, categoryName: string): string {
+  const name = subtopicName.toLowerCase();
+  const cat = categoryName.toLowerCase();
+
+  // Map well-known subtopic patterns to readable questions
+  const patterns: [RegExp, string][] = [
+    [/labour.market|labor.market/, `Does immigration harm the labour market more than it helps?`],
+    [/public.service/, `Is immigration putting unsustainable pressure on public services?`],
+    [/cultural.integr/, `Should cultural integration be a condition of immigration?`],
+    [/border.security/, `Should border security be significantly tightened?`],
+    [/taxation|tax/, `Should taxes on higher earners be increased?`],
+    [/trade/, `Should the UK pursue more free trade agreements?`],
+    [/employment|jobs/, `Should the government do more to regulate employment conditions?`],
+    [/public.debt|deficit/, `Should the government prioritise reducing public debt?`],
+    [/planning/, `Should planning restrictions be loosened to allow more development?`],
+    [/affordab/, `Is the housing affordability crisis mainly a supply problem?`],
+    [/social.hous/, `Should the government build significantly more social housing?`],
+    [/land.own/, `Should land ownership be reformed to reduce speculation?`],
+    [/nhs.fund|health.fund/, `Should NHS funding be substantially increased?`],
+    [/mental.health/, `Is mental health adequately prioritised within the NHS?`],
+    [/preventat/, `Should the NHS focus more resources on preventative care?`],
+    [/pharma/, `Should pharmaceutical regulation be strengthened?`],
+    [/net.zero/, `Should the UK maintain its current net-zero targets?`],
+    [/energy.trans/, `Should the energy transition be accelerated?`],
+    [/env.reg|environment.reg/, `Should environmental regulation be strengthened?`],
+    [/adaptat/, `Should more resources go to climate adaptation rather than mitigation?`],
+    [/nato/, `Should the UK increase its NATO spending commitments?`],
+    [/nuclear/, `Should the UK maintain its nuclear deterrent?`],
+    [/foreign.aid/, `Should the UK maintain or increase its foreign aid budget?`],
+    [/trade.dipl/, `Should economic ties with authoritarian states be reduced?`],
+    [/school.fund/, `Are UK schools underfunded?`],
+    [/curriculum/, `Should the school curriculum be reformed?`],
+    [/higher.ed|university/, `Should university tuition fees be reduced or abolished?`],
+    [/skills|apprentice/, `Should vocational training be better funded than universities?`],
+    [/ai.safe/, `Should AI development be more strictly regulated?`],
+    [/data.priv/, `Should data privacy protections be strengthened?`],
+    [/big.tech/, `Should large technology platforms be broken up or regulated?`],
+    [/digital.inf/, `Should the government invest more in digital infrastructure?`],
+  ];
+
+  for (const [pattern, question] of patterns) {
+    if (pattern.test(name)) return question;
+  }
+
+  // Generic fallback
+  return `Do you broadly support the mainstream position on ${subtopicName}${categoryName ? ` (${categoryName})` : ""}?`;
+}
+
+// -----------------------------------------------------------------------
 // GET — review payload
 // -----------------------------------------------------------------------
 export async function GET(req: NextRequest) {
@@ -123,29 +177,39 @@ export async function GET(req: NextRequest) {
 
   const [catRes, subRes] = await Promise.all([
     svc.from("taxonomy_categories").select("id, name").in("id", categoryIds),
-    svc.from("taxonomy_subtopics").select("id, name").in("id", subtopicIds),
+    svc.from("taxonomy_subtopics").select("id, name, latent_question_text").in("id", subtopicIds),
   ]);
 
   const catMap = new Map((catRes.data ?? []).map((c: any) => [c.id, c.name]));
-  const subMap = new Map((subRes.data ?? []).map((s: any) => [s.id, s.name]));
+  const subMap = new Map((subRes.data ?? []).map((s: any) => [s.id, s]));
 
   const items: ReviewItem[] = positions
     .filter((p: any) => p.subtopic_id)
-    .map((p: any) => ({
-      position_id: p.id,
-      category_id: p.category_id,
-      category_name: catMap.get(p.category_id) ?? "Unknown",
-      subtopic_id: p.subtopic_id,
-      subtopic_name: subMap.get(p.subtopic_id) ?? "Unknown",
-      stance: p.stance,
-      confidence: p.confidence ?? 0.5,
-      reasoning: p.reasoning ?? null,
-      arguments: Array.isArray(p.arguments_json) ? p.arguments_json : [],
-      weight_d: p.weight_d,
-      weight_q: p.weight_q,
-      weight_c: p.weight_c,
-      weight_total: p.weight_total,
-    }));
+    .map((p: any) => {
+      const sub = subMap.get(p.subtopic_id) as any;
+      const subtopicName: string = sub?.name ?? "Unknown";
+      // Use latent_question_text if set, otherwise turn the subtopic name into a natural question
+      const questionText: string =
+        sub?.latent_question_text ??
+        subtopicToQuestion(subtopicName, catMap.get(p.category_id) ?? "");
+
+      return {
+        position_id: p.id,
+        category_id: p.category_id,
+        category_name: catMap.get(p.category_id) ?? "Unknown",
+        subtopic_id: p.subtopic_id,
+        subtopic_name: subtopicName,
+        question_text: questionText,
+        stance: p.stance,
+        confidence: p.confidence ?? 0.5,
+        reasoning: p.reasoning ?? null,
+        arguments: Array.isArray(p.arguments_json) ? p.arguments_json : [],
+        weight_d: p.weight_d,
+        weight_q: p.weight_q,
+        weight_c: p.weight_c,
+        weight_total: p.weight_total,
+      };
+    });
 
   return NextResponse.json({ items });
 }

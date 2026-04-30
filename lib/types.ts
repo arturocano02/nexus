@@ -3,6 +3,35 @@
 export type UUID = string;
 
 // -----------------------------------------------------------------------
+// Auth — profile and user views
+// -----------------------------------------------------------------------
+
+export interface Profile {
+  id: UUID;
+  username: string;
+  display_name: string;
+  age: number;
+  country: string | null;
+  avatar_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserView {
+  id: UUID;
+  user_id: UUID;
+  topic_label: string;
+  summary: string;
+  confidence_score: number;
+  raw_excerpts: string[];
+  submitted_to_arena: boolean;
+  submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+  is_deleted: boolean;
+}
+
+// -----------------------------------------------------------------------
 // Auth / user
 // -----------------------------------------------------------------------
 
@@ -79,6 +108,7 @@ export interface InferredPosition {
   weight_c: number | null;
   weight_total: number | null;
   deployed_at: string | null;
+  retracted_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -123,6 +153,8 @@ export interface ReviewItem {
   category_name: string;
   subtopic_id: UUID;
   subtopic_name: string;
+  /** The plain-English question the user is voting yes/no/abstain on */
+  question_text: string;
   stance: "yes" | "no" | "abstain" | "unclear" | null;
   confidence: number;
   reasoning: string | null;
@@ -188,6 +220,10 @@ export interface MapNodeDatum {
   tension?: number;
   /** Override blob color (for arena green/amber/red coloring) */
   hexColor?: string;
+  /** If set, this is a satellite blob orbiting the parent category blob */
+  parentId?: string;
+  /** Satellites are rendered smaller and orbit their parent */
+  isSatellite?: boolean;
 }
 
 // -----------------------------------------------------------------------

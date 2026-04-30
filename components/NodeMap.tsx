@@ -10,15 +10,15 @@ import { colorForRelationship, thicknessForSimilarity } from "@/lib/relationship
 export interface MapNodeDatum {
   id: string;
   label: string;
-  weight: number; // conversation volume (raw_excerpts.length or word_count proxy)
-  conviction: number; // 0..1 confidence_score (your view) OR agreement_pct/100 (arena)
+  weight: number;
+  conviction: number; // 0..1
   pulsing?: boolean;
   isOwn?: boolean;
-  // Arena-only: 0..1 disagreement signal. Higher means the topic is
-  // contested, which we use to jitter the blob more vigorously.
   tension?: number;
-  /** Override blob color directly (for arena green/amber/red coloring) */
   hexColor?: string;
+  /** If set, this node orbits around the parent category blob */
+  parentId?: string;
+  isSatellite?: boolean;
 }
 
 interface NodeMapProps {
@@ -222,6 +222,136 @@ function ThoughtBlob({
         </div>
       </Html>
     </group>
+  );
+}
+
+// -----------------------------------------------------------------------
+// Satellite blob — sized by weight (argument count), orbiting parent
+// -----------------------------------------------------------------------
+function SatelliteBlob({
+  data,
+  position,
+  onSelect,
+}: {
+  data: MapNodeDatum;
+  position: THREE.Vector3;
+  onSelect?: (id: string) => void;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const meshRef = useRef<THREE.Mesh>(null);
+  const lightRef = useRef<THREE.PointLight>(null);
+  const [hovered, setHovered] = useState(false);
+  const posRef = useRef(position.clone());
+  const scaleCurrent = useRef(0.01);
+
+  // weight ∈ [0.3, 0.9] → baseScale ∈ [0.32, 0.50]
+  const baseScale = 0.26 + data.weight * 0.26;
+
+  useFrame((state, dt) => {
+    if (!groupRef.current || !meshRef.current || dt > 0.1) return;
+    posRef.current.lerp(position, 1 - Math.exp(-14 * dt));
+    groupRef.current.position.copy(posRef.current);
+    const t = state.clock.getElapsedTime();
+    const pulse = 1 + Math.sin(t * 1.4 + data.id.charCodeAt(0) * 0.9) * 0.07;
+    // Smoothly grow toward target scale so adding arguments feels organic
+    scaleCurrent.current += (baseScale - scaleCurrent.current) * 3 * dt;
+    const s = scaleCurrent.current * pulse * (hovered ? 1.18 : 1);
+    meshRef.current.scale.setScalar(s);
+    if (lightRef.current) {
+      lightRef.current.intensity = (hovered ? 1.8 : 1.1) * (0.8 + data.weight * 0.4);
+    }
+  });
+
+  const hexColor = data.hexColor ?? AMBER;
+
+  return (
+    <group ref={groupRef}>
+      <mesh
+        ref={meshRef}
+        onClick={(e) => { e.stopPropagation(); onSelect?.(data.id); }}
+        onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; }}
+        onPointerOut={() => { setHovered(false); document.body.style.cursor = "default"; }}
+      >
+        <sphereGeometry args={[1, 24, 24]} />
+        <MeshDistortMaterial
+          color={hexColor}
+          distort={0.25}
+          speed={1.4}
+          emissive={hexColor}
+          emissiveIntensity={hovered ? 4.5 : 2.8}
+          roughness={0.9}
+          metalness={0}
+        />
+      </mesh>
+      <pointLight ref={lightRef} color={hexColor} intensity={1.1} distance={3.5} decay={2} />
+      {/* Hover-only tooltip: show label only when directly hovered */}
+      {hovered && (
+        <Html
+          position={[0, baseScale + 0.22, 0]}
+          center
+          distanceFactor={7}
+          zIndexRange={[0, 8]}
+          style={{ pointerEvents: "none" }}
+        >
+          <div
+            className="px-2 py-1 rounded-full font-bold uppercase tracking-widest whitespace-nowrap"
+            style={{
+              fontSize: "9px",
+              background: "rgba(2,3,8,0.92)",
+              border: `1px solid ${hexColor}55`,
+              color: hexColor,
+              boxShadow: `0 0 10px ${hexColor}33`,
+            }}
+          >
+            {data.label}
+          </div>
+        </Html>
+      )}
+    </group>
+  );
+}
+
+// -----------------------------------------------------------------------
+// Thin glowing line connecting a satellite to its parent category blob
+// -----------------------------------------------------------------------
+function SatelliteConnector({
+  start,
+  end,
+  color,
+}: {
+  start: THREE.Vector3; // satellite pos (mutated each frame by physics)
+  end: THREE.Vector3;   // parent pos (mutated each frame by physics)
+  color: string;
+}) {
+  const geomRef = useRef<THREE.BufferGeometry>(null);
+  const opacityRef = useRef(0);
+  const matRef = useRef<THREE.LineBasicMaterial>(null);
+
+  useFrame((_, dt) => {
+    if (dt > 0.1) return;
+    // Fade in
+    opacityRef.current = Math.min(0.38, opacityRef.current + dt * 1.2);
+    if (geomRef.current) {
+      geomRef.current.setFromPoints([start, end]);
+    }
+    if (matRef.current) {
+      matRef.current.opacity = opacityRef.current;
+    }
+  });
+
+  return (
+    // @ts-ignore — R3F line primitive
+    <line>
+      <bufferGeometry ref={geomRef} />
+      <lineBasicMaterial
+        ref={matRef}
+        color={color}
+        transparent
+        opacity={0}
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+      />
+    </line>
   );
 }
 
@@ -429,10 +559,15 @@ function NodeField({
     const attraction = 0.55 * (physicsBoost ? 18 : 1);
     const gravity = physicsBoost ? (isExploding ? 0.02 : 1.8) : 0.07;
 
-    nodes.forEach((ni) => {
+    // Separate category nodes from satellite nodes
+    const categoryNodes = nodes.filter(n => !n.isSatellite);
+    const satelliteNodes = nodes.filter(n => n.isSatellite);
+
+    categoryNodes.forEach((ni) => {
       const stateI = nodeStates.current.get(ni.id);
       if (!stateI) return;
-      nodes.forEach((nj) => {
+      // Repulsion only between category nodes
+      categoryNodes.forEach((nj) => {
         if (ni.id === nj.id) return;
         const stateJ = nodeStates.current.get(nj.id);
         if (!stateJ) return;
@@ -442,6 +577,45 @@ function NodeField({
         stateI.vel.add(diff.normalize().multiplyScalar(repulsion / distSq).multiplyScalar(dt));
       });
       stateI.vel.add(new THREE.Vector3().copy(stateI.pos).multiplyScalar(-gravity).multiplyScalar(dt));
+    });
+
+    // Satellites: orbit their parent with a spring force
+    satelliteNodes.forEach((ni) => {
+      const stateI = nodeStates.current.get(ni.id);
+      if (!stateI) return;
+      const parentState = ni.parentId ? nodeStates.current.get(ni.parentId) : null;
+      if (parentState) {
+        const toParent = new THREE.Vector3().subVectors(parentState.pos, stateI.pos);
+        const dist = toParent.length();
+        const orbitRadius = 1.7;
+        // Spring toward orbit radius from parent
+        const springForce = (dist - orbitRadius) * 12 * dt;
+        stateI.vel.add(toParent.normalize().multiplyScalar(springForce));
+        // Slight sideways drift to make them orbit rather than stack
+        const tangent = new THREE.Vector3(
+          Math.sin(t * 0.6 + ni.id.charCodeAt(0) * 1.3),
+          Math.cos(t * 0.5 + ni.id.charCodeAt(1) * 1.1),
+          Math.sin(t * 0.7 + ni.id.charCodeAt(2) * 0.9),
+        ).normalize().multiplyScalar(0.4 * dt);
+        stateI.vel.add(tangent);
+      }
+      // Mild repulsion between satellites of the same parent
+      satelliteNodes.forEach((nj) => {
+        if (ni.id === nj.id || ni.parentId !== nj.parentId) return;
+        const stateJ = nodeStates.current.get(nj.id);
+        if (!stateJ) return;
+        const diff = new THREE.Vector3().subVectors(stateI.pos, stateJ.pos);
+        const distSq = Math.max(0.05, diff.lengthSq());
+        stateI.vel.add(diff.normalize().multiplyScalar(2 / distSq).multiplyScalar(dt));
+      });
+      stateI.vel.multiplyScalar(0.82); // stronger damping for satellites
+    });
+
+    // Only category nodes apply standard gravity
+    nodes.filter(n => !n.isSatellite).forEach(ni => {
+      const stateI = nodeStates.current.get(ni.id);
+      if (!stateI) return;
+      // (already handled above)
     });
 
     links.forEach((link) => {
@@ -492,6 +666,21 @@ function NodeField({
 
   return (
     <>
+      {/* Satellite → parent connector lines (behind everything) */}
+      {nodes.filter(n => n.isSatellite && n.parentId).map((n) => {
+        const satState = nodeStates.current.get(n.id);
+        const parentState = nodeStates.current.get(n.parentId!);
+        if (!satState || !parentState) return null;
+        return (
+          <SatelliteConnector
+            key={`conn-${n.id}`}
+            start={satState.pos}
+            end={parentState.pos}
+            color={n.hexColor ?? AMBER}
+          />
+        );
+      })}
+
       {visibleLinks.map((link) => {
         const start = nodeStates.current.get(link.node_a_id)?.pos;
         const end = nodeStates.current.get(link.node_b_id)?.pos;
@@ -511,8 +700,17 @@ function NodeField({
       {nodes.map((n) => {
         const state = nodeStates.current.get(n.id);
         if (!state) return null;
-        // Inject arena color prop natively
-        n.isOwn = !isArena; // So the color engine knows how to react
+        n.isOwn = !isArena;
+        if (n.isSatellite) {
+          return (
+            <SatelliteBlob
+              key={n.id}
+              data={n}
+              position={state.pos}
+              onSelect={onSelect}
+            />
+          );
+        }
         return (
           <ThoughtBlob
             key={n.id}
@@ -538,12 +736,18 @@ export default function NodeMap({
   physicsBoost = false,
   highlightIds,
   isArena,
+  radius,
   cameraDistance = 22,
+  emptyHint,
 }: NodeMapProps) {
   const maxWeight = useMemo(
-    () => nodes.reduce((m, n) => Math.max(m, n.weight), 1),
+    () => nodes.filter(n => !n.isSatellite).reduce((m, n) => Math.max(m, n.weight), 1),
     [nodes],
   );
+
+  // Show "click to begin" hint only on the personal map (not arena), and only when no panel is open
+  const showHint = !isArena && nodes.length > 0 && nodes.every(n => !n.pulsing);
+
   return (
     <div className="absolute inset-0 bg-[#080a18]">
       <Canvas dpr={[1, 2]} camera={{ position: [0, 0, cameraDistance], fov: 50 }}>
@@ -562,14 +766,31 @@ export default function NodeMap({
             highlightIds={highlightIds}
             maxWeight={maxWeight}
             isArena={isArena}
+            radius={radius}
           />
+        )}
+        {showHint && (
+          <Html
+            position={[0, -3.5, 0]}
+            center
+            distanceFactor={10}
+            zIndexRange={[0, 5]}
+            style={{ pointerEvents: "none" }}
+          >
+            <p
+              className="font-mono text-[9px] uppercase tracking-[0.4em] animate-pulse text-center"
+              style={{ color: "rgba(255,191,0,0.35)", whiteSpace: "nowrap" }}
+            >
+              Click a blob to begin
+            </p>
+          </Html>
         )}
         <OrbitControls
           enablePan={false}
           autoRotate
-          autoRotateSpeed={physicsBoost ? 14 : 0.8}
+          autoRotateSpeed={physicsBoost ? 14 : 0.6}
           minDistance={6}
-          maxDistance={60}
+          maxDistance={40}
         />
       </Canvas>
     </div>
