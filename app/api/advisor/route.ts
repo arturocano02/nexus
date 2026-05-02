@@ -329,7 +329,7 @@ async function upsertBeliefUpdates(
         summary: upd.summary,
         confidence_score: Math.max(0, Math.min(1, upd.confidence_score)),
         raw_excerpts: excerpts,
-      }).catch(() => { /* may fail if profile doesn't exist */ });
+      });
     }
   }
 }
