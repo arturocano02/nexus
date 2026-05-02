@@ -99,14 +99,15 @@ function MessageBubble({
         style={
           isAI
             ? {
-                background: "rgba(12,8,40,0.85)",
-                border: "1px solid rgba(255,255,255,0.08)",
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.10)",
                 color: "rgba(245,245,245,0.92)",
-                backdropFilter: "blur(16px)",
+                backdropFilter: "blur(12px)",
+                WebkitBackdropFilter: "blur(12px)",
               }
             : {
                 background: "rgba(255,191,0,0.13)",
-                border: "1px solid rgba(255,191,0,0.2)",
+                border: "1px solid rgba(255,191,0,0.25)",
                 color: "rgba(245,245,245,0.95)",
               }
         }
@@ -316,9 +317,11 @@ export default function AdvisorOverlay({
             className="fixed inset-x-0 bottom-0 z-[210] flex flex-col mx-auto max-w-2xl w-full"
             style={{
               height: "75dvh",
-              background: "#000033",
+              background: "rgba(4,4,36,0.72)",
+              backdropFilter: "blur(28px) saturate(160%)",
+              WebkitBackdropFilter: "blur(28px) saturate(160%)",
               borderRadius: "16px 16px 0 0",
-              borderTop: "1px solid rgba(255,255,255,0.08)",
+              borderTop: "1px solid rgba(255,255,255,0.10)",
             }}
           >
             {/* Close handle */}
