@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { useUser } from "@/lib/useUser";
 import type { CategoryAggregate, MapNodeDatum, SubtopicAggregate } from "@/lib/types";
@@ -258,7 +259,7 @@ export default function ArenaPage() {
 }
 
 // -----------------------------------------------------------------------
-// Category detail overlay (slide-up)
+// Combined views overlay — redesigned per spec
 // -----------------------------------------------------------------------
 function CategoryOverlay({
   category,
@@ -269,8 +270,45 @@ function CategoryOverlay({
   userSubtopicIds: Set<string>;
   onClose: () => void;
 }) {
-  const flag = category.tension_flag;
-  const flagColor = tensionColor(flag, category.yes_weighted_pct);
+  const router = useRouter();
+  const supa = supabaseBrowser();
+
+  // Fetch subtopic questions (latent_question_text) for the question section
+  const [questions, setQuestions] = useState<{ subtopic_id: string; question: string }[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      const subIds = category.subtopics.map(s => s.subtopic_id);
+      if (!subIds.length) return;
+      const { data } = await supa
+        .from("taxonomy_subtopics")
+        .select("id, latent_question_text, name")
+        .in("id", subIds);
+      if (data) {
+        setQuestions(
+          data.map((s: any) => ({
+            subtopic_id: s.id,
+            question: s.latent_question_text || s.name,
+          }))
+        );
+      }
+    })();
+  }, [category.category_id]);
+
+  function handleAddArgument() {
+    // Store context so your-view/advisor can pick it up
+    sessionStorage.setItem("nexus_arena_context", JSON.stringify({
+      topic: category.category_name,
+      for_args: category.top_yes_args,
+      against_args: category.top_no_args,
+    }));
+    onClose();
+    router.push("/your-view");
+  }
+
+  const yesPct = category.yes_weighted_pct;
+  const noPct = category.no_weighted_pct;
+  const agentCount = category.total_responses;
 
   return (
     <>
@@ -279,7 +317,7 @@ function CategoryOverlay({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
-        className="fixed inset-0 z-[180] bg-black/50 backdrop-blur-sm"
+        className="fixed inset-0 z-[180] bg-black/60 backdrop-blur-sm"
       />
       <motion.div
         initial={{ y: "100%" }}
@@ -287,161 +325,163 @@ function CategoryOverlay({
         exit={{ y: "100%" }}
         transition={{ type: "spring", stiffness: 300, damping: 30 }}
         className="fixed inset-x-0 bottom-0 z-[190] mx-auto max-w-2xl w-full"
-        style={{ maxHeight: "70dvh" }}
+        style={{ maxHeight: "80dvh" }}
       >
         <div
-          className="glass h-full rounded-t-[2.5rem] flex flex-col text-secondary overflow-hidden"
-          style={{ maxHeight: "70dvh" }}
+          className="flex flex-col text-secondary overflow-hidden"
+          style={{
+            maxHeight: "80dvh",
+            background: "rgba(4,2,24,0.97)",
+            backdropFilter: "blur(24px)",
+            borderTop: "1px solid rgba(255,255,255,0.07)",
+            borderRadius: "24px 24px 0 0",
+          }}
         >
           {/* Header */}
-          <div className="flex items-start justify-between px-7 pt-7 pb-4 shrink-0">
+          <div className="shrink-0 px-6 pt-6 pb-4 flex items-start justify-between">
             <div>
-              <p
-                className="text-[9px] uppercase tracking-[0.3em] font-bold mb-1"
-                style={{ color: flagColor }}
-              >
-                {flag.toUpperCase()} — {category.total_responses} response{category.total_responses !== 1 ? "s" : ""}
-              </p>
-              <h2 className="font-display text-2xl font-bold tracking-tight">
+              <h2 className="font-display text-xl font-bold tracking-tight">
                 {category.category_name}
               </h2>
+              <p className="text-[11px] mt-1" style={{ color: "rgba(245,245,245,0.35)" }}>
+                {agentCount} agent{agentCount !== 1 ? "s" : ""} contributed to this topic
+              </p>
             </div>
             <button
               onClick={onClose}
-              className="w-10 h-10 flex items-center justify-center rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
+              className="w-9 h-9 flex items-center justify-center rounded-full"
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
           </div>
 
-          {/* Overall yes/no bar */}
-          <div className="px-7 pb-4 shrink-0">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-[9px] uppercase tracking-widest text-secondary/40">
-                {category.yes_weighted_pct}% yes
-              </span>
-              <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${category.yes_weighted_pct}%`,
-                    background: `linear-gradient(90deg, ${flagColor}, ${flagColor}99)`,
-                  }}
-                />
+          {/* Split bar */}
+          <div className="shrink-0 px-6 pb-4">
+            <div className="flex rounded-xl overflow-hidden h-10 text-sm font-bold">
+              <div
+                className="flex items-center justify-center transition-all"
+                style={{
+                  flex: yesPct,
+                  background: "rgba(255,191,0,0.25)",
+                  borderRight: "1px solid rgba(0,0,0,0.3)",
+                  color: "#FFBF00",
+                  fontSize: 13,
+                  minWidth: yesPct > 10 ? undefined : 0,
+                }}
+              >
+                {yesPct > 12 && `${yesPct}%`}
               </div>
-              <span className="text-[9px] uppercase tracking-widest text-secondary/40">
-                {category.no_weighted_pct}% no
-              </span>
+              <div
+                className="flex items-center justify-center transition-all"
+                style={{
+                  flex: noPct,
+                  background: "rgba(255,90,106,0.25)",
+                  color: "#FF5A6A",
+                  fontSize: 13,
+                  minWidth: noPct > 10 ? undefined : 0,
+                }}
+              >
+                {noPct > 12 && `${noPct}%`}
+              </div>
+            </div>
+            <div className="flex justify-between mt-1">
+              <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: "rgba(255,191,0,0.5)" }}>For</span>
+              <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: "rgba(255,90,106,0.5)" }}>Against</span>
             </div>
           </div>
 
-          {/* Subtopics */}
-          <div className="flex-1 overflow-y-auto px-7 pb-7 space-y-3 scrollbar-hide">
-            {category.subtopics
-              .filter((s) => s.total_responses > 0)
-              .sort((a, b) => b.total_responses - a.total_responses)
-              .map((sub) => (
-                <SubtopicRow
-                  key={sub.subtopic_id}
-                  subtopic={sub}
-                  isOwn={userSubtopicIds.has(sub.subtopic_id)}
-                />
+          {/* Questions */}
+          {questions.length > 0 && (
+            <div className="shrink-0 px-6 pb-4 space-y-1.5">
+              {questions.slice(0, 3).map(q => (
+                <p key={q.subtopic_id} className="text-sm italic" style={{ color: "rgba(255,191,0,0.75)" }}>
+                  "{q.question}"
+                </p>
               ))}
+            </div>
+          )}
 
-            {category.subtopics.every((s) => s.total_responses === 0) && (
-              <p className="text-secondary/30 text-sm text-center py-8">
-                No responses for this topic yet.
+          {/* For / Against columns */}
+          <div className="flex-1 overflow-y-auto px-6 pb-4 scrollbar-hide">
+            <div className="grid grid-cols-2 gap-3">
+              {/* FOR column */}
+              <div>
+                <p className="text-[9px] uppercase tracking-[0.25em] font-bold mb-2"
+                  style={{ color: "rgba(255,191,0,0.5)" }}>For</p>
+                <div className="space-y-2">
+                  {category.top_yes_args.slice(0, 5).map((arg, i) => (
+                    <div
+                      key={i}
+                      className="rounded-xl px-3 py-2.5"
+                      style={{ background: "rgba(255,191,0,0.06)", border: "1px solid rgba(255,191,0,0.1)" }}
+                    >
+                      <p className="text-xs leading-relaxed" style={{ color: "rgba(245,245,245,0.72)" }}>
+                        {arg}
+                      </p>
+                      <span
+                        className="text-[9px] mt-1.5 inline-flex items-center gap-1"
+                        style={{ color: "rgba(255,191,0,0.4)" }}
+                      >
+                        #{i + 1} most common
+                      </span>
+                    </div>
+                  ))}
+                  {category.top_yes_args.length === 0 && (
+                    <p className="text-xs" style={{ color: "rgba(245,245,245,0.2)" }}>No arguments yet</p>
+                  )}
+                </div>
+              </div>
+
+              {/* AGAINST column */}
+              <div>
+                <p className="text-[9px] uppercase tracking-[0.25em] font-bold mb-2"
+                  style={{ color: "rgba(255,90,106,0.5)" }}>Against</p>
+                <div className="space-y-2">
+                  {category.top_no_args.slice(0, 5).map((arg, i) => (
+                    <div
+                      key={i}
+                      className="rounded-xl px-3 py-2.5"
+                      style={{ background: "rgba(255,90,106,0.06)", border: "1px solid rgba(255,90,106,0.1)" }}
+                    >
+                      <p className="text-xs leading-relaxed" style={{ color: "rgba(245,245,245,0.72)" }}>
+                        {arg}
+                      </p>
+                      <span
+                        className="text-[9px] mt-1.5 inline-flex items-center gap-1"
+                        style={{ color: "rgba(255,90,106,0.4)" }}
+                      >
+                        #{i + 1} most common
+                      </span>
+                    </div>
+                  ))}
+                  {category.top_no_args.length === 0 && (
+                    <p className="text-xs" style={{ color: "rgba(245,245,245,0.2)" }}>No arguments yet</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {agentCount === 0 && (
+              <p className="text-center text-sm py-8" style={{ color: "rgba(245,245,245,0.25)" }}>
+                No contributions yet for this topic.
               </p>
             )}
+          </div>
 
-            {/* Top arguments */}
-            {(category.top_yes_args.length > 0 || category.top_no_args.length > 0) && (
-              <div className="pt-2 space-y-4">
-                {category.top_yes_args.length > 0 && (
-                  <div>
-                    <p className="text-[9px] uppercase tracking-widest text-[#00DCFF]/60 font-bold mb-2">
-                      Top yes arguments
-                    </p>
-                    {category.top_yes_args.map((arg, i) => (
-                      <p key={i} className="text-xs text-secondary/60 leading-relaxed pl-3 border-l border-[#00DCFF]/20 mb-2">
-                        {arg}
-                      </p>
-                    ))}
-                  </div>
-                )}
-                {category.top_no_args.length > 0 && (
-                  <div>
-                    <p className="text-[9px] uppercase tracking-widest text-[#FF5A6A]/60 font-bold mb-2">
-                      Top no arguments
-                    </p>
-                    {category.top_no_args.map((arg, i) => (
-                      <p key={i} className="text-xs text-secondary/60 leading-relaxed pl-3 border-l border-[#FF5A6A]/20 mb-2">
-                        {arg}
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+          {/* Add your argument CTA */}
+          <div className="shrink-0 px-6 pb-8 pt-3 border-t border-white/5">
+            <button
+              onClick={handleAddArgument}
+              className="w-full btn-primary py-3 text-sm font-semibold"
+            >
+              Add your argument
+            </button>
           </div>
         </div>
       </motion.div>
     </>
-  );
-}
-
-function SubtopicRow({
-  subtopic,
-  isOwn,
-}: {
-  subtopic: SubtopicAggregate;
-  isOwn: boolean;
-}) {
-  const color = tensionColor(subtopic.tension_flag, subtopic.yes_weighted_pct);
-
-  return (
-    <div className="rounded-xl border border-white/6 bg-white/[0.02] px-4 py-3">
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-secondary/80">
-            {subtopic.subtopic_name}
-          </span>
-          {isOwn && (
-            <span className="text-[8px] uppercase tracking-widest px-2 py-0.5 rounded-full bg-amber/10 text-amber/70 border border-amber/20">
-              your view
-            </span>
-          )}
-        </div>
-        <span
-          className="text-[9px] uppercase tracking-widest font-bold"
-          style={{ color }}
-        >
-          {subtopic.tension_flag}
-        </span>
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="text-[9px] text-secondary/40 w-8">
-          {subtopic.yes_weighted_pct}%
-        </span>
-        <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
-          <div
-            className="h-full rounded-full"
-            style={{
-              width: `${subtopic.yes_weighted_pct}%`,
-              background: color,
-            }}
-          />
-        </div>
-        <span className="text-[9px] text-secondary/40 w-8 text-right">
-          {subtopic.no_weighted_pct}%
-        </span>
-      </div>
-      <p className="text-[9px] text-secondary/25 mt-1">
-        {subtopic.total_responses} response{subtopic.total_responses !== 1 ? "s" : ""}
-        {subtopic.abstain_count > 0 ? ` · ${subtopic.abstain_count} abstained` : ""}
-      </p>
-    </div>
   );
 }

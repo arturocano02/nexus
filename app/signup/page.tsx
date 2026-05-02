@@ -18,6 +18,7 @@ export default function SignupPage() {
   const supa = supabaseBrowser();
 
   const [displayName, setDisplayName] = useState("");
+  const [advisorName, setAdvisorName] = useState("");
   const [username, setUsername] = useState("");
   const [age, setAge] = useState("");
   const [email, setEmail] = useState("");
@@ -80,6 +81,11 @@ export default function SignupPage() {
   function validate(): boolean {
     const e: Record<string, string> = {};
     if (!displayName.trim()) e.displayName = "Display name is required";
+    const aName = advisorName.trim();
+    if (!aName) e.advisorName = "Give your advisor a name";
+    else if (aName.length < 2) e.advisorName = "At least 2 characters";
+    else if (aName.length > 20) e.advisorName = "Max 20 characters";
+    else if (!/^[a-zA-Z0-9 ]+$/.test(aName)) e.advisorName = "Letters, numbers, and spaces only";
     const uRaw = username.trim().toLowerCase();
     if (!uRaw) {
       e.username = "Username is required";
@@ -110,7 +116,7 @@ export default function SignupPage() {
   // -----------------------------------------------------------------------
   async function handleSignUp(e: React.FormEvent) {
     e.preventDefault();
-    setTouched({ displayName: true, username: true, age: true, email: true, password: true });
+    setTouched({ displayName: true, advisorName: true, username: true, age: true, email: true, password: true });
     if (!validate()) return;
     if (usernameStatus === "checking") return;
 
@@ -142,6 +148,7 @@ export default function SignupPage() {
       id: userId,
       username: uRaw,
       display_name: displayName.trim(),
+      advisor_name: advisorName.trim(),
       age: parseInt(age, 10),
     });
 
@@ -225,6 +232,22 @@ export default function SignupPage() {
             />
             {touched.displayName && errors.displayName && (
               <p className="mt-1 text-[12px]" style={{ color: "#FF5A6A" }}>{errors.displayName}</p>
+            )}
+          </div>
+
+          {/* Advisor name */}
+          <div>
+            <input
+              type="text"
+              placeholder="What should your AI advisor be called?"
+              value={advisorName}
+              onChange={(e) => { setAdvisorName(e.target.value); setErrors(prev => ({ ...prev, advisorName: "" })); }}
+              onBlur={() => setTouched(prev => ({ ...prev, advisorName: true }))}
+              className="w-full bg-navy-800 rounded-xl px-4 py-3 text-sm outline-none ring-1 ring-white/10 focus:ring-amber/60 transition placeholder:text-secondary/30"
+            />
+            <p className="mt-1 text-[10px] text-secondary/25">Letters, numbers, spaces · 2–20 chars</p>
+            {touched.advisorName && errors.advisorName && (
+              <p className="mt-0.5 text-[12px]" style={{ color: "#FF5A6A" }}>{errors.advisorName}</p>
             )}
           </div>
 

@@ -6,6 +6,28 @@ export type UUID = string;
 // Auth — profile and user views
 // -----------------------------------------------------------------------
 
+export interface BeliefUpdate {
+  topic_label: string;
+  summary: string;
+  confidence_score: number;
+  raw_excerpt: string;
+  confirmation_status: "inferred" | "confirmed";
+}
+
+export interface ConversationMessage {
+  role: "user" | "assistant";
+  content: string;
+  topic_tags?: string[];
+  belief_updates?: BeliefUpdate[];
+  timestamp: string;
+}
+
+export interface AdvisorApiResponse {
+  message: string;
+  topic_tags: string[];
+  belief_updates: BeliefUpdate[];
+}
+
 export interface Profile {
   id: UUID;
   username: string;
@@ -13,6 +35,7 @@ export interface Profile {
   age: number;
   country: string | null;
   avatar_url: string | null;
+  advisor_name: string | null;
   created_at: string;
   updated_at: string;
 }
