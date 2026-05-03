@@ -99,11 +99,9 @@ function MessageBubble({
         style={
           isAI
             ? {
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.02)",
+                border: "1px solid rgba(255,255,255,0.05)",
                 color: "rgba(245,245,245,0.92)",
-                backdropFilter: "blur(12px)",
-                WebkitBackdropFilter: "blur(12px)",
               }
             : {
                 background: "rgba(255,191,0,0.13)",
@@ -499,15 +497,15 @@ export default function AdvisorOverlay({
                         className="w-8 h-8 shrink-0 flex items-center justify-center rounded-full transition-all"
                         style={{
                           background: speech.listening
-                            ? "rgba(255,90,106,0.18)"
-                            : "rgba(255,255,255,0.06)",
+                            ? "rgba(255,191,0,0.18)"
+                            : "rgba(255,191,0,0.08)",
                           border: speech.listening
-                            ? "1px solid rgba(255,90,106,0.45)"
-                            : "1px solid rgba(255,255,255,0.1)",
+                            ? "1px solid rgba(255,191,0,0.55)"
+                            : "1px solid rgba(255,191,0,0.2)",
                         }}
                       >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                          stroke={speech.listening ? "#FF5A6A" : "rgba(255,255,255,0.4)"}
+                          stroke={speech.listening ? "#FFBF00" : "rgba(255,191,0,0.6)"}
                           strokeWidth="2.2" strokeLinecap="round">
                           <rect x="9" y="2" width="6" height="12" rx="3" />
                           <path d="M5 10a7 7 0 0014 0M12 19v3M8 22h8" />
