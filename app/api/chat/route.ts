@@ -26,20 +26,26 @@ export const dynamic = "force-dynamic";
   - If messages is empty, the AI sends the opening question for the category
     (fetched from taxonomy_categories.opening_question).
   - Otherwise the AI continues the conversation as a curious interviewer /
-    devil's advocate / knowledgeable explainer. It never asks yes/no questions
-    explicitly — it asks open, inviting questions and lets the user reveal their views.
+    devil's advocate / knowledgeable explainer.
   - After every user turn, classification runs async in the background
     (triggerClassify) without blocking the stream.
-  - Every turn (both assistant and user messages) is saved to public.messages.
+  - Every turn is saved to public.messages.
+
+  V5 update: subtopic goals and classification now use the `questions` table
+  (binary decision tree, L1-L5) instead of the deprecated `taxonomy_questions`.
+  The classifier infers depth (1-5) so weight_d in inferred_positions reflects
+  which layer of the tree the user actually engaged with.
 */
 
+// ---------------------------------------------------------------------------
+// System prompt
+// ---------------------------------------------------------------------------
 function buildSystemPrompt(
   categoryName: string,
   subtopicGoals: string,
   userTurnCount: number,
   avgUserWords: number,
 ): string {
-  // Calibrate response length to how much the user writes
   const lengthRule =
     avgUserWords <= 15
       ? "User writes short. You write SHORT — 1 punchy sentence + 1 question. Max 30 words total."
@@ -49,23 +55,25 @@ function buildSystemPrompt(
 
   const contradictionRule =
     userTurnCount >= 4
-      ? "You have conversation history with this person. Look for contradictions with what they said earlier and call them out directly — 'But earlier you said X, now you're saying Y — which is it?'"
+      ? "You have conversation history. Look for contradictions with earlier statements and call them out directly — 'But earlier you said X, now you're saying Y — which is it?'"
       : "";
 
   return `You are a sharp political sparring partner. Topic: ${categoryName}.
 
-${subtopicGoals ? `PRIVATE — your real job is to gather enough signal to confidently infer this person's stance on the following questions. Never ask them directly. Draw it out naturally through debate, pushback, and specific questions that force them to reveal their position:
+${subtopicGoals ? `PRIVATE — your real job is to gather enough signal to infer this person's stance on the following questions. Never ask them directly. Draw it out through debate, pushback, and pointed questions that force them to reveal their position:
 ${subtopicGoals}
 
 ` : ""}LENGTH: ${lengthRule}
 
-STYLE: Direct, a little combative, witty when possible. Name actual policies, stats, cases. Make them work for their position. Always end with one short punchy question.
+STYLE: Direct, a little combative, witty when possible. Name actual policies, stats, real cases. Make them work for their position. Always end with one short punchy question.
 ${contradictionRule ? `\nCONTRADICTIONS: ${contradictionRule}` : ""}
 Never moralize. Never fawn. Never reveal you're analysing their views. ${categoryName} only — don't drift.`;
 }
 
+// ---------------------------------------------------------------------------
+// POST handler
+// ---------------------------------------------------------------------------
 export async function POST(req: NextRequest) {
-  // Auth check
   const supa = await supabaseServer();
   const { data: { user } } = await supa.auth.getUser();
   if (!user) {
@@ -86,7 +94,7 @@ export async function POST(req: NextRequest) {
 
   const svc = supabaseService();
 
-  // Fetch category info — select only stable columns (opening_question added by V2 migration)
+  // Resolve category
   let categoryName = "this topic";
   let resolvedCategoryId = category_id;
 
@@ -109,18 +117,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Upsert session record — table may not exist yet (pre-V2-migration), ignore errors
+  // Upsert session
   if (resolvedCategoryId) {
     try {
       await svc.from("sessions").upsert(
         { id: session_id, user_id: user.id, category_id: resolvedCategoryId, last_active: new Date().toISOString() },
         { onConflict: "id" }
       );
-    } catch { /* table not yet created — safe to skip */ }
+    } catch { /* table may not exist yet */ }
   }
 
-  // Fetch subtopic goals — the questions the AI needs to extract views on.
-  // These go into the hidden section of the system prompt.
+  // -------------------------------------------------------------------
+  // Build subtopic goals from V5 `questions` table (L1 root nodes)
+  // -------------------------------------------------------------------
   let subtopicGoals = "";
   if (resolvedCategoryId) {
     try {
@@ -132,27 +141,35 @@ export async function POST(req: NextRequest) {
         .order("sort_order");
 
       if (subtopics && subtopics.length > 0) {
-        // For each subtopic, use latent_question_text if set, else fall back to depth-1 question
         const subIds = subtopics.map((s: any) => s.id);
-        const { data: questions } = await svc
-          .from("taxonomy_questions")
+
+        // Fetch L1 root questions from the V5 `questions` table
+        const { data: rootQs } = await svc
+          .from("questions")
           .select("subtopic_id, question_text")
           .in("subtopic_id", subIds)
-          .eq("depth_layer", 1);
+          .eq("layer", 1)
+          .is("parent_question_id", null);
 
-        const qBySubtopic = new Map((questions ?? []).map((q: any) => [q.subtopic_id, q.question_text]));
+        // Build a map: subtopic_id → first L1 question text
+        const l1BySubtopic = new Map<string, string>();
+        for (const q of rootQs ?? []) {
+          if (!l1BySubtopic.has(q.subtopic_id)) {
+            l1BySubtopic.set(q.subtopic_id, q.question_text);
+          }
+        }
 
         subtopicGoals = subtopics
           .map((s: any) => {
-            const q = s.latent_question_text ?? qBySubtopic.get(s.id) ?? s.name;
-            return `• ${s.name}: "${q}"`;
+            const goal = s.latent_question_text ?? l1BySubtopic.get(s.id) ?? s.name;
+            return `• ${s.name}: "${goal}"`;
           })
           .join("\n");
       }
-    } catch { /* taxonomy tables may not exist yet */ }
+    } catch { /* questions table may not exist yet */ }
   }
 
-  // Compute adaptive length hint from the last few user messages
+  // Adaptive length from recent user turns
   const userMessages = messages.filter((m) => m.role === "user");
   const avgUserWords =
     userMessages.length > 0
@@ -160,6 +177,9 @@ export async function POST(req: NextRequest) {
         Math.min(3, userMessages.length)
       : 20;
 
+  // -------------------------------------------------------------------
+  // SSE stream
+  // -------------------------------------------------------------------
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -170,10 +190,8 @@ export async function POST(req: NextRequest) {
       try {
         let assistantContent = "";
 
-        // FIRST TURN: when history is empty, AI opens with a contextual question.
-        // (opening_question column is optional — falls back to a generated opener)
+        // First turn — send opening question
         if (messages.length === 0) {
-          // Try to fetch opening_question if it exists
           let opener: string | null = null;
           try {
             const { data: catFull } = await svc
@@ -184,12 +202,11 @@ export async function POST(req: NextRequest) {
             opener = catFull?.opening_question ?? null;
           } catch { /* column may not exist yet */ }
 
-          opener = opener ?? `What aspect of ${categoryName} do you feel most strongly about? I'd love to hear what's on your mind.`;
+          opener = opener ?? `What aspect of ${categoryName} do you feel most strongly about?`;
 
           send({ type: "delta", text: opener });
           assistantContent = opener;
 
-          // Persist to messages table if it exists
           try {
             await svc.from("messages").insert({
               user_id: user.id, session_id, category_id: resolvedCategoryId ?? null,
@@ -202,7 +219,7 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        // SUBSEQUENT TURNS: save user message, then stream AI reply
+        // Subsequent turns — save user message, generate reply
         const lastMessage = messages[messages.length - 1];
         if (lastMessage.role === "user") {
           try {
@@ -218,26 +235,16 @@ export async function POST(req: NextRequest) {
           content: m.content,
         }));
 
-        // Non-streaming: collect the full response then send as one delta.
-        // Per-token streaming caused truncation in the Next.js dev environment
-        // (only the first token was reaching the client).
         const resp = await anthropic.messages.create({
           model: MODEL,
           max_tokens: 300,
-          system: buildSystemPrompt(
-            categoryName,
-            subtopicGoals,
-            userMessages.length,
-            avgUserWords,
-          ),
+          system: buildSystemPrompt(categoryName, subtopicGoals, userMessages.length, avgUserWords),
           messages: anthropicMessages,
         });
 
-        assistantContent =
-          resp.content.find((c) => c.type === "text")?.text ?? "";
+        assistantContent = resp.content.find((c) => c.type === "text")?.text ?? "";
         send({ type: "delta", text: assistantContent });
 
-        // Save assistant reply (best-effort — table may not exist yet)
         try {
           await svc.from("messages").insert({
             user_id: user.id, session_id, category_id: resolvedCategoryId ?? null,
@@ -245,7 +252,7 @@ export async function POST(req: NextRequest) {
           });
         } catch { /* table not yet created */ }
 
-        // Fire-and-forget classification
+        // Fire-and-forget classification using V5 questions tree
         if (resolvedCategoryId && lastMessage.role === "user") {
           triggerClassify({
             userId: user.id,
@@ -263,9 +270,7 @@ export async function POST(req: NextRequest) {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Stream error";
         controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({ type: "error", message: msg })}\n\n`
-          )
+          encoder.encode(`data: ${JSON.stringify({ type: "error", message: msg })}\n\n`)
         );
         controller.close();
       }
@@ -281,10 +286,16 @@ export async function POST(req: NextRequest) {
   });
 }
 
-// -----------------------------------------------------------------------
-// Async classification (fire-and-forget)
-// -----------------------------------------------------------------------
-
+// ---------------------------------------------------------------------------
+// Async classification — V5 version
+//
+// Key improvements over V4:
+// 1. Uses `questions` table (binary tree) instead of `taxonomy_questions`
+// 2. Passes all L1+L2 question nodes per subtopic so Claude can identify
+//    which branch the user was on
+// 3. Claude returns `depth` (1-5) and `question_id` (best matching node)
+// 4. weight_d is populated from the actual tree layer, not just 1.0
+// ---------------------------------------------------------------------------
 async function triggerClassify(payload: {
   userId: string;
   sessionId: string;
@@ -302,24 +313,54 @@ async function triggerClassify(payload: {
 
   if (!subtopics || subtopics.length === 0) return;
 
-  // Depth-1 questions as reference anchors
-  const subtopicIds = subtopics.map((s: { id: string }) => s.id);
-  const { data: questions } = await svc
-    .from("taxonomy_questions")
-    .select("subtopic_id, question_text")
-    .in("subtopic_id", subtopicIds)
-    .eq("depth_layer", 1);
+  const namedSubtopics = subtopics.filter((s: any) => !s.is_other);
+  if (namedSubtopics.length === 0) return;
 
-  const anchorBySubtopic = new Map<string, string>();
-  for (const q of questions ?? []) {
-    anchorBySubtopic.set(q.subtopic_id, q.question_text);
+  const subtopicIds = namedSubtopics.map((s: any) => s.id);
+
+  // Fetch L1 and L2 question nodes from the V5 `questions` table.
+  // L1 = root of each decision tree (the core binary question).
+  // L2 = first YES/NO split — tells us which branch the user is on.
+  // Passing both layers gives Claude enough context to estimate depth.
+  const { data: questionNodes } = await svc
+    .from("questions")
+    .select("id, subtopic_id, layer, question_text, parent_answer, parent_question_id")
+    .in("subtopic_id", subtopicIds)
+    .in("layer", [1, 2])
+    .order("layer");
+
+  // Build per-subtopic question context string
+  type QNode = {
+    id: string;
+    subtopic_id: string;
+    layer: number;
+    question_text: string;
+    parent_answer: string | null;
+    parent_question_id: string | null;
+  };
+
+  const nodesBySubtopic = new Map<string, QNode[]>();
+  for (const n of (questionNodes ?? []) as QNode[]) {
+    if (!nodesBySubtopic.has(n.subtopic_id)) nodesBySubtopic.set(n.subtopic_id, []);
+    nodesBySubtopic.get(n.subtopic_id)!.push(n);
   }
 
-  const namedSubtopics = subtopics.filter((s: { is_other: boolean }) => !s.is_other);
+  // Assemble the subtopic list for the classifier prompt
   const subtopicList = namedSubtopics
-    .map((s: { id: string; name: string }) => {
-      const anchor = anchorBySubtopic.get(s.id);
-      return `- ${s.name} (id: ${s.id})${anchor ? ` — anchor question: "${anchor}"` : ""}`;
+    .map((s: any) => {
+      const nodes = nodesBySubtopic.get(s.id) ?? [];
+      const l1 = nodes.find(n => n.layer === 1);
+      const l2yes = nodes.find(n => n.layer === 2 && n.parent_answer === "yes");
+      const l2no  = nodes.find(n => n.layer === 2 && n.parent_answer === "no");
+
+      let nodeDesc = "";
+      if (l1) {
+        nodeDesc += `\n  L1 [${l1.id}]: "${l1.question_text}"`;
+        if (l2yes) nodeDesc += `\n  L2-YES [${l2yes.id}]: "${l2yes.question_text}"`;
+        if (l2no)  nodeDesc += `\n  L2-NO  [${l2no.id}]: "${l2no.question_text}"`;
+      }
+
+      return `- ${s.name} (subtopic_id: ${s.id})${nodeDesc}`;
     })
     .join("\n");
 
@@ -336,31 +377,33 @@ async function triggerClassify(payload: {
 
   const resp = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 1000,
+    max_tokens: 1200,
     messages: [
       {
         role: "user",
         content: `Analyse this conversation about ${categoryName} and infer the user's political positions.
 
-SUBTOPICS (only classify against these):
+SUBTOPICS with their binary question tree nodes (L1 = root, L2-YES = if they agreed, L2-NO = if they disagreed):
 ${subtopicList}
 
 CONVERSATION:
 ${conversationText}
 
-For each subtopic where the user's view can be meaningfully inferred from what they said, output:
-- subtopic_id: the exact UUID from the list above
+For each subtopic where the user's view can be meaningfully inferred, output:
+- subtopic_id: exact UUID
 - stance: "yes" | "no" | "abstain" | "unclear"
-  "yes" = user broadly supports or is sympathetic to the mainstream position on this subtopic
-  "no" = user is sceptical or opposes it
-  "abstain" = user explicitly declines to take a position
+  "yes" = user broadly supports the L1 proposition
+  "no" = user opposes or is sceptical
+  "abstain" = explicitly declines
   "unclear" = too little signal
 - confidence: 0.0–1.0
-- reasoning: 1–2 sentences citing specific things the user said
-- key_argument: the single strongest argument the user made (or "" if none clear)
+- depth: 1–5 (how specific was their engagement? 1=vague opinion, 2=basic position, 3=nuanced argument, 4=detailed reasoning, 5=highly specific policy-level)
+- question_id: the UUID of the L1 or L2 question node that best captures what they were specifically engaging with (use L2 if you can tell which branch they're on, otherwise L1)
+- reasoning: 1–2 sentences citing what they said
+- key_argument: single strongest argument the user made (or "" if none)
 
 Only include subtopics where confidence > 0.3 and the conversation has real signal.
-Return ONLY a JSON array: [{"subtopic_id":"...","stance":"...","confidence":0.0,"reasoning":"...","key_argument":"..."}, ...]`,
+Return ONLY a JSON array: [{"subtopic_id":"...","stance":"...","confidence":0.0,"depth":1,"question_id":"...","reasoning":"...","key_argument":"..."}, ...]`,
       },
     ],
   });
@@ -374,6 +417,8 @@ Return ONLY a JSON array: [{"subtopic_id":"...","stance":"...","confidence":0.0,
     subtopic_id: string;
     stance: string;
     confidence: number;
+    depth: number;
+    question_id: string;
     reasoning: string;
     key_argument: string;
   }>;
@@ -384,18 +429,44 @@ Return ONLY a JSON array: [{"subtopic_id":"...","stance":"...","confidence":0.0,
     return;
   }
 
+  // Build a set of valid question UUIDs from what we fetched
+  const validQuestionIds = new Set<string>(
+    (questionNodes ?? []).map((n: any) => n.id)
+  );
+
   const now = new Date().toISOString();
 
   for (const inf of inferences) {
     if (!inf.subtopic_id || typeof inf.confidence !== "number") continue;
-    const sub = namedSubtopics.find((s: { id: string }) => s.id === inf.subtopic_id);
+    const sub = namedSubtopics.find((s: any) => s.id === inf.subtopic_id);
     if (!sub) continue;
 
-    const args = inf.key_argument
-      ? [{ text: inf.key_argument, ts: now }]
-      : [];
+    const stance = ["yes", "no", "abstain", "unclear"].includes(inf.stance)
+      ? inf.stance
+      : "unclear";
+    const confidence = Math.max(0, Math.min(1, inf.confidence));
 
-    // Upsert inferred_positions (raw session-level data)
+    // Depth must be 1-5; if Claude gave something invalid, default to 1
+    const depth = typeof inf.depth === "number" && inf.depth >= 1 && inf.depth <= 5
+      ? Math.round(inf.depth)
+      : 1;
+    const weightD = depth; // D=1 at L1, D=5 at L5
+
+    // Validate the question_id Claude returned; fall back to the L1 node
+    let questionId: string | null = null;
+    if (inf.question_id && validQuestionIds.has(inf.question_id)) {
+      questionId = inf.question_id;
+    } else {
+      // Fall back: find the L1 root for this subtopic
+      const l1 = (questionNodes ?? []).find(
+        (n: any) => n.subtopic_id === inf.subtopic_id && n.layer === 1
+      );
+      questionId = (l1 as any)?.id ?? null;
+    }
+
+    const args = inf.key_argument ? [{ text: inf.key_argument, ts: now }] : [];
+
+    // Upsert inferred_positions with real depth + question_id
     try {
       await svc.from("inferred_positions").upsert(
         {
@@ -403,58 +474,57 @@ Return ONLY a JSON array: [{"subtopic_id":"...","stance":"...","confidence":0.0,
           session_id: payload.sessionId,
           category_id: payload.categoryId,
           subtopic_id: inf.subtopic_id,
-          stance: ["yes", "no", "abstain", "unclear"].includes(inf.stance) ? inf.stance : "unclear",
-          confidence: Math.max(0, Math.min(1, inf.confidence)),
+          question_id: questionId,
+          stance,
+          confidence,
           reasoning: inf.reasoning ?? null,
           arguments_json: args,
+          weight_d: weightD,
           updated_at: now,
         },
         { onConflict: "user_id,session_id,subtopic_id" }
       );
     } catch { /* table not yet created */ }
 
-    // Upsert user_views — persistent, user-editable view keyed on user+topic
-    // Only upsert if this user has a profile row (authenticated users only)
+    // Upsert user_views — persistent cross-session record
     if (inf.key_argument || inf.reasoning) {
       try {
         const { data: existingView } = await svc
           .from("user_views")
           .select("id, raw_excerpts, submitted_to_arena")
           .eq("user_id", payload.userId)
-          .eq("topic_label", (sub as { name: string }).name)
+          .eq("topic_label", (sub as any).name)
           .eq("is_deleted", false)
           .maybeSingle();
 
-        if (existingView && existingView.submitted_to_arena) {
-          // Submitted views are read-only — skip update
-          continue;
-        }
+        // Submitted views are immutable
+        if (existingView?.submitted_to_arena) continue;
 
         const existingExcerpts: string[] = Array.isArray(existingView?.raw_excerpts)
           ? existingView.raw_excerpts
           : [];
         const newExcerpt = inf.key_argument ?? inf.reasoning ?? "";
         const raw_excerpts = newExcerpt
-          ? [...new Set([...existingExcerpts, newExcerpt])].slice(-20) // keep last 20
+          ? [...new Set([...existingExcerpts, newExcerpt])].slice(-20)
           : existingExcerpts;
 
         if (existingView) {
           await svc.from("user_views").update({
             summary: inf.reasoning ?? "",
-            confidence_score: Math.max(0, Math.min(1, inf.confidence)),
+            confidence_score: confidence,
             raw_excerpts,
             updated_at: now,
           }).eq("id", existingView.id);
         } else {
           await svc.from("user_views").insert({
             user_id: payload.userId,
-            topic_label: (sub as { name: string }).name,
+            topic_label: (sub as any).name,
             summary: inf.reasoning ?? "",
-            confidence_score: Math.max(0, Math.min(1, inf.confidence)),
+            confidence_score: confidence,
             raw_excerpts,
           });
         }
-      } catch { /* profiles table may not exist or user has no profile */ }
+      } catch { /* user_views may not exist yet */ }
     }
   }
 }

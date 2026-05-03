@@ -270,7 +270,11 @@ export async function POST(req: NextRequest) {
         ? pos.arguments_json[0].text
         : "");
 
-    const weight_d = depthMultiplier(totalTurns);
+    // Use classifier-assigned depth (real tree layer 1-5) if present,
+    // otherwise fall back to conversation-length heuristic
+    const weight_d = typeof pos.weight_d === "number" && pos.weight_d > 0
+      ? pos.weight_d
+      : depthMultiplier(totalTurns);
 
     const otherArgs = allArgs.filter((a) => a !== argText);
     const { specificity, consistency } = await scoreArgumentQuality(argText, otherArgs);

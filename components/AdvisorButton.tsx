@@ -8,7 +8,7 @@ interface AdvisorButtonProps {
 }
 
 const MicIcon = () => (
-  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1a0e00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="9" y="2" width="6" height="12" rx="3" />
     <path d="M5 10a7 7 0 0014 0M12 19v3M8 22h8" />
   </svg>
@@ -29,7 +29,7 @@ export default function AdvisorButton({ onClick, hasAlert = false }: AdvisorButt
             width: 72,
             height: 72,
             borderRadius: "50%",
-            background: "radial-gradient(circle at 40% 35%, #8B6FDB, #6B4FBB)",
+            background: "radial-gradient(circle at 40% 35%, #FFD24D, #FFBF00)",
             border: "1px solid rgba(255,255,255,0.15)",
             display: "flex",
             alignItems: "center",

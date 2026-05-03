@@ -289,12 +289,11 @@ function ViewCard({
         borderRadius: 16,
         border: "1px solid rgba(255,255,255,0.06)",
         background: "rgba(14,10,40,0.6)",
-        overflow: "hidden",
         display: "flex",
       }}
     >
       {/* Confidence bar (left edge) */}
-      <div style={{ width: 4, background: "rgba(255,255,255,0.05)", position: "relative", flexShrink: 0 }}>
+      <div style={{ width: 4, background: "rgba(255,255,255,0.05)", position: "relative", flexShrink: 0, borderRadius: "16px 0 0 16px", overflow: "hidden" }}>
         <div
           style={{
             position: "absolute",

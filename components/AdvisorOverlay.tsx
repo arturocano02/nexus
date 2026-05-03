@@ -99,15 +99,15 @@ function MessageBubble({
         style={
           isAI
             ? {
-                background: "rgba(255,255,255,0.02)",
-                border: "1px solid rgba(255,255,255,0.05)",
-                color: "rgba(245,245,245,0.92)",
-              }
+              background: "rgba(255,255,255,0.02)",
+              border: "1px solid rgba(255,255,255,0.05)",
+              color: "rgba(245,245,245,0.92)",
+            }
             : {
-                background: "rgba(255,191,0,0.13)",
-                border: "1px solid rgba(255,191,0,0.25)",
-                color: "rgba(245,245,245,0.95)",
-              }
+              background: "rgba(255,191,0,0.13)",
+              border: "1px solid rgba(255,191,0,0.25)",
+              color: "rgba(245,245,245,0.95)",
+            }
         }
       >
         {isStreaming ? (

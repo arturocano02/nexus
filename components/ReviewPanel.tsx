@@ -20,10 +20,19 @@ const STANCE_LABELS: Record<string, { label: string; color: string; bg: string }
   unclear: { label: "UNCLEAR", color: "#FFBF00", bg: "rgba(255,191,0,0.12)" },
 };
 
+interface ContradictionFlag {
+  id: string;
+  description: string;
+  severity: "hard" | "soft";
+  position_a: { id: string; subtopic_name: string; stance: string } | null;
+  position_b: { id: string; subtopic_name: string; stance: string } | null;
+}
+
 export default function ReviewPanel({ open, sessionId, onClose, onSubmitted }: ReviewPanelProps) {
   const [items, setItems] = useState<ReviewItem[] | null>(null);
   const [phase, setPhase] = useState<"loading" | "review" | "submitting" | "done">("loading");
   const [error, setError] = useState<string | null>(null);
+  const [contradictions, setContradictions] = useState<ContradictionFlag[]>([]);
 
   // Load (or reset) whenever the panel opens/closes
   useEffect(() => {
@@ -43,14 +52,50 @@ export default function ReviewPanel({ open, sessionId, onClose, onSubmitted }: R
     setPhase("loading");
     setError(null);
     try {
-      const res = await fetch(`/api/submit?session_id=${encodeURIComponent(sessionId)}`);
-      const body = await res.json();
-      setItems(body.items ?? []);
+      // Load review items and run contradiction detection in parallel
+      const [reviewRes, contraRes] = await Promise.all([
+        fetch(`/api/submit?session_id=${encodeURIComponent(sessionId)}`),
+        fetch("/api/detect-contradictions"),
+      ]);
+      const reviewBody = await reviewRes.json();
+      setItems(reviewBody.items ?? []);
+
+      // Contradiction detection: fire scan after items are loaded
+      // (existing flags loaded immediately; new scan runs async)
+      const contraBody = await contraRes.json();
+      setContradictions(contraBody.flags ?? []);
+
+      // Also trigger a fresh scan for this session
+      fetch("/api/detect-contradictions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId }),
+      })
+        .then(r => r.json())
+        .then(d => {
+          if (d.found > 0) {
+            // Reload flags after scan
+            fetch("/api/detect-contradictions")
+              .then(r => r.json())
+              .then(d2 => setContradictions(d2.flags ?? []));
+          }
+        })
+        .catch(() => { /* non-critical */ });
+
       setPhase("review");
     } catch {
       setError("Could not load your responses. Please try again.");
       setPhase("review");
     }
+  }
+
+  async function dismissContradiction(flagId: string) {
+    setContradictions(prev => prev.filter(f => f.id !== flagId));
+    await fetch("/api/detect-contradictions", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ flag_id: flagId }),
+    }).catch(() => { /* best-effort */ });
   }
 
   function updateStance(id: string, stance: StanceValue) {
@@ -167,6 +212,56 @@ export default function ReviewPanel({ open, sessionId, onClose, onSubmitted }: R
 
               {/* Content */}
               <div className="flex-1 overflow-y-auto px-7 pb-4 space-y-4 scrollbar-hide">
+
+                {/* Contradiction flags */}
+                {contradictions.length > 0 && phase === "review" && (
+                  <div className="space-y-2 mb-2">
+                    {contradictions.map(flag => (
+                      <motion.div
+                        key={flag.id}
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -8 }}
+                        className="rounded-2xl px-4 py-3 flex items-start gap-3"
+                        style={{
+                          background: flag.severity === "hard"
+                            ? "rgba(255,90,106,0.08)"
+                            : "rgba(255,191,0,0.06)",
+                          border: `1px solid ${flag.severity === "hard" ? "rgba(255,90,106,0.25)" : "rgba(255,191,0,0.20)"}`,
+                        }}
+                      >
+                        <span className="text-base mt-0.5 shrink-0">
+                          {flag.severity === "hard" ? "⚡" : "～"}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[10px] uppercase tracking-[0.2em] font-bold mb-1"
+                            style={{ color: flag.severity === "hard" ? "#FF5A6A" : "#FFBF00" }}>
+                            {flag.severity === "hard" ? "Contradiction" : "Tension"}
+                          </p>
+                          <p className="text-xs text-secondary/70 leading-relaxed">
+                            {flag.description}
+                          </p>
+                          {flag.position_a && flag.position_b && (
+                            <p className="text-[10px] text-secondary/30 mt-1.5">
+                              {flag.position_a.subtopic_name} ({flag.position_a.stance})
+                              {" vs "}
+                              {flag.position_b.subtopic_name} ({flag.position_b.stance})
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => dismissContradiction(flag.id)}
+                          className="shrink-0 text-secondary/20 hover:text-secondary/50 transition-colors"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+
                 {phase === "loading" && (
                   <div className="py-16 text-center">
                     <p className="font-mono text-[10px] tracking-[0.5em] text-secondary/20 uppercase animate-pulse">
