@@ -9,10 +9,10 @@ import type { ConversationMessage, AdvisorApiResponse } from "@/lib/types";
 interface AdvisorOverlayProps {
   open: boolean;
   onClose: () => void;
-  /** Pre-load a topic when opened from a globe node tap */
   initialTopic?: string | null;
-  /** Context from the arena "Add your argument" button */
   arenaContext?: { topic: string; for_args: string[]; against_args: string[] } | null;
+  unsubmittedCount?: number;
+  onOpenManifesto?: () => void;
 }
 
 type Mode = "voice" | "text";
@@ -130,18 +130,18 @@ function MessageBubble({
   );
 }
 
-// CSS morphing blob for voice mode
+// CSS morphing blob for voice mode — amber
 function VoiceBlob({ isActive }: { isActive: boolean }) {
   return (
     <div
       className={isActive ? "blob-active" : "blob-idle"}
       style={{
-        width: 140,
-        height: 140,
-        background: "radial-gradient(circle at 40% 35%, #9B6FEB, #6B4FBB)",
+        width: 160,
+        height: 160,
+        background: "radial-gradient(circle at 40% 35%, #FFD84D, #FFBF00)",
         boxShadow: isActive
-          ? "0 0 60px rgba(107,79,187,0.7)"
-          : "0 0 40px rgba(107,79,187,0.3)",
+          ? "0 0 80px rgba(255,191,0,0.55)"
+          : "0 0 40px rgba(255,191,0,0.2)",
         transition: "box-shadow 0.3s ease",
       }}
     />
@@ -153,12 +153,14 @@ export default function AdvisorOverlay({
   onClose,
   initialTopic,
   arenaContext,
+  unsubmittedCount = 0,
+  onOpenManifesto,
 }: AdvisorOverlayProps) {
   const { profile } = useUserStore();
   const advisorName = profile?.advisor_name || "Nexus";
   const speech = useSpeech();
 
-  const [mode, setMode] = useState<Mode>("text");
+  const [mode, setMode] = useState<Mode>("voice");
   const [messages, setMessages] = useState<(ConversationMessage & { _dismissed?: string[] })[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -337,15 +339,44 @@ export default function AdvisorOverlay({
               />
             </div>
 
-            {/* Header: advisor name + mode tabs */}
-            <div className="shrink-0 px-5 pb-3 flex items-center justify-between">
-              <span
-                style={{ fontSize: 14, fontWeight: 500, color: "#FFBF00", letterSpacing: "0.02em" }}
-              >
+            {/* Header: advisor name | submit CTA | mode toggle */}
+            <div className="shrink-0 px-4 pb-3 flex items-center justify-between gap-3">
+              <span style={{ fontSize: 14, fontWeight: 500, color: "#FFBF00", letterSpacing: "0.02em", flexShrink: 0 }}>
                 {advisorName}
               </span>
-              <div className="flex items-center gap-1">
-                {/* Mic mode button */}
+
+              {/* Submit views CTA — always visible, lights up when there are views */}
+              <button
+                onClick={() => { onOpenManifesto?.(); }}
+                className={unsubmittedCount > 0 ? "advisor-pulse-alert" : ""}
+                style={{
+                  flex: 1,
+                  borderRadius: 999,
+                  padding: "6px 14px",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: "0.04em",
+                  border: unsubmittedCount > 0
+                    ? "1px solid rgba(255,191,0,0.55)"
+                    : "1px solid rgba(255,255,255,0.1)",
+                  background: unsubmittedCount > 0
+                    ? "rgba(255,191,0,0.15)"
+                    : "rgba(255,255,255,0.03)",
+                  color: unsubmittedCount > 0
+                    ? "#FFBF00"
+                    : "rgba(245,245,245,0.2)",
+                  cursor: unsubmittedCount > 0 ? "pointer" : "default",
+                  transition: "all 0.3s",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {unsubmittedCount > 0
+                  ? `Submit views (${unsubmittedCount})`
+                  : "No views yet"}
+              </button>
+
+              {/* Mode toggle: mic / chat */}
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   onClick={() => setMode("voice")}
                   className="w-9 h-9 flex items-center justify-center rounded-full transition-all"
@@ -362,7 +393,6 @@ export default function AdvisorOverlay({
                     <path d="M5 10a7 7 0 0014 0M12 19v3M8 22h8" />
                   </svg>
                 </button>
-                {/* Text mode button */}
                 <button
                   onClick={() => setMode("text")}
                   className="w-9 h-9 flex items-center justify-center rounded-full transition-all"
@@ -385,11 +415,12 @@ export default function AdvisorOverlay({
                 Voice mode
             ---------------------------------------------------------------- */}
             {mode === "voice" && (
-              <div className="flex-1 flex flex-col items-center justify-center gap-5 px-5 overflow-hidden">
-                {/* CSS blob */}
+              <div
+                className="flex-1 flex flex-col items-center justify-center gap-5 px-5 overflow-y-auto min-h-0"
+                style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}
+              >
                 <VoiceBlob isActive={isListening} />
 
-                {/* Transcript / last response */}
                 <div className="text-center max-w-xs space-y-2">
                   {speech.interim && (
                     <p className="text-sm italic" style={{ color: "rgba(255,191,0,0.7)" }}>
@@ -406,20 +437,19 @@ export default function AdvisorOverlay({
                   })()}
                 </div>
 
-                {/* Mic control */}
                 <button
                   onClick={toggleMic}
                   disabled={!speech.supported}
-                  className="w-16 h-16 rounded-full flex items-center justify-center transition-all"
+                  className="w-16 h-16 rounded-full flex items-center justify-center transition-all shrink-0"
                   style={{
-                    background: isListening ? "rgba(255,90,106,0.2)" : "rgba(107,79,187,0.3)",
-                    border: isListening ? "2px solid rgba(255,90,106,0.6)" : "2px solid rgba(107,79,187,0.5)",
-                    boxShadow: isListening ? "0 0 30px rgba(255,90,106,0.3)" : "none",
+                    background: isListening ? "rgba(255,191,0,0.15)" : "rgba(255,191,0,0.08)",
+                    border: isListening ? "2px solid rgba(255,191,0,0.6)" : "2px solid rgba(255,191,0,0.25)",
+                    boxShadow: isListening ? "0 0 30px rgba(255,191,0,0.25)" : "none",
                   }}
                 >
                   {isListening ? (
                     <motion.svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-                      stroke="#FF5A6A" strokeWidth="2.2" strokeLinecap="round"
+                      stroke="#FFBF00" strokeWidth="2.2" strokeLinecap="round"
                       animate={{ scale: [1, 1.15, 1] }}
                       transition={{ duration: 0.7, repeat: Infinity }}
                     >
@@ -428,14 +458,14 @@ export default function AdvisorOverlay({
                     </motion.svg>
                   ) : (
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-                      stroke="rgba(255,255,255,0.7)" strokeWidth="2.2" strokeLinecap="round">
+                      stroke="rgba(255,191,0,0.7)" strokeWidth="2.2" strokeLinecap="round">
                       <rect x="9" y="2" width="6" height="12" rx="3" />
                       <path d="M5 10a7 7 0 0014 0M12 19v3M8 22h8" />
                     </svg>
                   )}
                 </button>
 
-                <p className="text-[10px] tracking-widest uppercase"
+                <p className="text-[10px] tracking-widest uppercase shrink-0"
                   style={{ color: "rgba(245,245,245,0.2)" }}>
                   {isListening ? "Listening..." : loading ? "Thinking..." : "Tap to speak"}
                 </p>
@@ -446,9 +476,9 @@ export default function AdvisorOverlay({
                 Text mode
             ---------------------------------------------------------------- */}
             {mode === "text" && (
-              <>
+              <div className="flex-1 min-h-0 flex flex-col">
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto px-4 py-2 space-y-3 scrollbar-hide">
+                <div className="flex-1 min-h-0 overflow-y-auto px-4 py-2 space-y-3 scrollbar-hide">
                   {messages.map((msg, i) => (
                     <MessageBubble
                       key={`${msg.timestamp}-${i}`}
@@ -460,7 +490,7 @@ export default function AdvisorOverlay({
                 </div>
 
                 {/* Input bar */}
-                <div className="shrink-0 px-4 pb-6 pt-2">
+                <div className="shrink-0 px-4 pt-2" style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}>
                   <div
                     className="flex items-end gap-2 rounded-2xl px-4 py-3"
                     style={{
@@ -532,7 +562,7 @@ export default function AdvisorOverlay({
                     </button>
                   </div>
                 </div>
-              </>
+              </div>
             )}
           </motion.div>
         </>

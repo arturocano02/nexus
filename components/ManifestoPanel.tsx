@@ -8,12 +8,13 @@ import { useUser } from "@/lib/useUser";
 import type { UserView } from "@/lib/types";
 
 interface ManifestoPanelProps {
-  /** Called when a view is submitted to arena, so the globe can update */
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
   onViewsChanged?: () => void;
 }
 
-export default function ManifestoPanel({ onViewsChanged }: ManifestoPanelProps) {
-  const [open, setOpen] = useState(false);
+export default function ManifestoPanel({ open, onOpen, onClose, onViewsChanged }: ManifestoPanelProps) {
   const [views, setViews] = useState<UserView[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -122,7 +123,7 @@ export default function ManifestoPanel({ onViewsChanged }: ManifestoPanelProps) 
     <>
       {/* Pill button — top center */}
       <button
-        onClick={() => setOpen(true)}
+        onClick={onOpen}
         style={{
           pointerEvents: "auto",
           background: "#FFBF00",
@@ -154,7 +155,7 @@ export default function ManifestoPanel({ onViewsChanged }: ManifestoPanelProps) 
                     position: "fixed", inset: 0, zIndex: 195,
                     background: "rgba(0,0,20,0.5)", backdropFilter: "blur(4px)",
                   }}
-                  onClick={() => setOpen(false)}
+                  onClick={onClose}
                 />
 
                 <motion.div
@@ -219,7 +220,7 @@ export default function ManifestoPanel({ onViewsChanged }: ManifestoPanelProps) 
                   {/* Close handle */}
                   <div
                     style={{ flexShrink: 0, display: "flex", justifyContent: "center", padding: "16px", cursor: "pointer" }}
-                    onClick={() => setOpen(false)}
+                    onClick={onClose}
                   >
                     <div style={{ width: 40, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.15)" }} />
                   </div>

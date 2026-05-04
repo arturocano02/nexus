@@ -42,7 +42,7 @@ const items = [
 export default function NavBar() {
   const pathname = usePathname();
   return (
-    <nav className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
+    <nav className="fixed left-1/2 -translate-x-1/2 z-40" style={{ bottom: "max(16px, env(safe-area-inset-bottom))" }}>
       <div className="glass rounded-pill px-2 py-2 flex items-center gap-1 shadow-card">
         {items.map(({ href, label, Icon }) => {
           const active = pathname?.startsWith(href);

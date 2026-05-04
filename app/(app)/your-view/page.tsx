@@ -41,6 +41,9 @@ export default function YourViewPage() {
   const [advisorTopic, setAdvisorTopic] = useState<string | null>(null);
   const [arenaContext, setArenaContext] = useState<{ topic: string; for_args: string[]; against_args: string[] } | null>(null);
 
+  // Manifesto panel state (lifted so advisor overlay can open it)
+  const [manifestoOpen, setManifestoOpen] = useState(false);
+
   // Categories the user has spoken to — amber tint
   const [touchedIds, setTouchedIds] = useState<Set<string>>(new Set());
 
@@ -238,7 +241,7 @@ export default function YourViewPage() {
   // -----------------------------------------------------------------------
   if (!ready) {
     return (
-      <div className="relative h-screen w-screen overflow-hidden">
+      <div className="relative w-screen overflow-hidden" style={{ height: "100dvh" }}>
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="relative w-64 h-64">
             {[
@@ -271,7 +274,7 @@ export default function YourViewPage() {
   }
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden">
+    <div className="relative w-screen overflow-hidden" style={{ height: "100dvh" }}>
 
       {/* 3D Globe */}
       <NodeMap
@@ -311,13 +314,17 @@ export default function YourViewPage() {
         {/* Center: Manifesto button */}
         <div className="absolute left-1/2 -translate-x-1/2"
           style={{ top: "max(16px, env(safe-area-inset-top))" }}>
-          <ManifestoPanel onViewsChanged={() => {
-            // Reload views when manifesto panel changes something
-            if (!user) return;
-            supa.from("user_views").select("id, topic_label, submitted_to_arena, confidence_score")
-              .eq("user_id", user.id).eq("is_deleted", false)
-              .then(({ data }) => { if (data) setUserViews(data as UserView[]); });
-          }} />
+          <ManifestoPanel
+            open={manifestoOpen}
+            onOpen={() => setManifestoOpen(true)}
+            onClose={() => setManifestoOpen(false)}
+            onViewsChanged={() => {
+              if (!user) return;
+              supa.from("user_views").select("id, topic_label, submitted_to_arena, confidence_score")
+                .eq("user_id", user.id).eq("is_deleted", false)
+                .then(({ data }) => { if (data) setUserViews(data as UserView[]); });
+            }}
+          />
         </div>
       </div>
 
@@ -349,7 +356,7 @@ export default function YourViewPage() {
       ---------------------------------------------------------------- */}
       <div
         className="absolute bottom-0 inset-x-0 z-20 flex justify-center pointer-events-none"
-        style={{ paddingBottom: "calc(72px + max(16px, env(safe-area-inset-bottom)))" }}
+        style={{ paddingBottom: "calc(80px + max(16px, env(safe-area-inset-bottom)))" }}
       >
         <AdvisorButton
           onClick={() => { setAdvisorTopic(null); setArenaContext(null); setAdvisorOpen(true); }}
@@ -365,6 +372,8 @@ export default function YourViewPage() {
         onClose={() => setAdvisorOpen(false)}
         initialTopic={advisorTopic}
         arenaContext={arenaContext}
+        unsubmittedCount={userViews.filter(v => !v.submitted_to_arena).length}
+        onOpenManifesto={() => setManifestoOpen(true)}
       />
     </div>
   );
