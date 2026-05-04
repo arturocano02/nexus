@@ -3331,5 +3331,322 @@
       }
     }
   ],
-  "immigration": []
+  "immigration": [
+    {
+      "name": "Should the UK reduce overall net migration",
+      "slug": "should-the-uk-reduce-overall-net-migration",
+      "subtopicSlug": "border-security",
+      "layer": 1,
+      "text": "Should the UK government actively reduce overall net migration levels through stricter entry controls?",
+      "is_tension": false,
+      "yes": {
+        "layer": 2,
+        "text": "Should reductions primarily target economic migrants rather than family reunification and humanitarian visas?",
+        "is_tension": false,
+        "yes": {
+          "layer": 3,
+          "text": "Should the government set an annual cap on the total number of work visas issued?",
+          "is_tension": false,
+          "yes": {
+            "layer": 4,
+            "text": "Should the cap apply equally to all sectors, including healthcare and technology?",
+            "is_tension": true,
+            "yes": {
+              "layer": 5,
+              "text": "Should the government actively recruit UK residents to fill vacancies before issuing any work visa?",
+              "is_tension": false
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should the NHS be exempt from any immigration cap given its chronic staffing shortages?",
+              "is_tension": false
+            }
+          },
+          "no": {
+            "layer": 4,
+            "text": "Should stricter enforcement target visa overstayers as a priority over new applicants?",
+            "is_tension": false,
+            "yes": {
+              "layer": 5,
+              "text": "Should biometric tracking be mandatory for all visa holders to enable automatic overstay detection?",
+              "is_tension": true
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should employers face higher fines for hiring undocumented workers instead of government tracking individuals?",
+              "is_tension": false
+            }
+          }
+        },
+        "no": {
+          "layer": 3,
+          "text": "Should the government prioritise reducing student visa numbers as part of net migration controls?",
+          "is_tension": false,
+          "yes": {
+            "layer": 4,
+            "text": "Should international students be barred from bringing dependants to the UK?",
+            "is_tension": false,
+            "yes": {
+              "layer": 5,
+              "text": "Should the restriction on dependants apply to postgraduate students as well as undergraduates?",
+              "is_tension": false
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should only research students at Russell Group universities be allowed to bring family members?",
+              "is_tension": true
+            }
+          },
+          "no": {
+            "layer": 4,
+            "text": "Should universities be penalised if former students do not leave after their visa expires?",
+            "is_tension": true,
+            "yes": {
+              "layer": 5,
+              "text": "Should repeat-offending universities lose their student visa sponsorship licence entirely?",
+              "is_tension": false
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should the government publish overstay-rate league tables by institution rather than penalising universities directly?",
+              "is_tension": false
+            }
+          }
+        }
+      },
+      "no": {
+        "layer": 2,
+        "text": "Should the UK create more legal routes for asylum seekers to reduce irregular channel crossings?",
+        "is_tension": false,
+        "yes": {
+          "layer": 3,
+          "text": "Should the UK reopen a safe-passage scheme allowing asylum seekers to apply from France?",
+          "is_tension": false,
+          "yes": {
+            "layer": 4,
+            "text": "Should the UK accept a quota system for distributing asylum seekers proportionally across participating countries?",
+            "is_tension": true,
+            "yes": {
+              "layer": 5,
+              "text": "Should the UK's quota be calculated based on GDP and population size equally?",
+              "is_tension": false
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should the UK negotiate bilateral deals with individual countries rather than joining a multilateral scheme?",
+              "is_tension": false
+            }
+          },
+          "no": {
+            "layer": 4,
+            "text": "Should a resettlement programme specifically target refugees from conflicts the UK was militarily involved in?",
+            "is_tension": false,
+            "yes": {
+              "layer": 5,
+              "text": "Should the government set a minimum annual resettlement target for conflict-zone refugees?",
+              "is_tension": false
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should resettlement decisions be made case-by-case by an independent panel rather than by government quotas?",
+              "is_tension": false
+            }
+          }
+        },
+        "no": {
+          "layer": 3,
+          "text": "Should the UK offshore asylum processing to a third country as a deterrence measure?",
+          "is_tension": true,
+          "yes": {
+            "layer": 4,
+            "text": "Should asylum seekers processed offshore be barred from ever settling in the UK even if their claim succeeds?",
+            "is_tension": true,
+            "yes": {
+              "layer": 5,
+              "text": "Should accepted offshore claimants be offered resettlement in a willing third country instead?",
+              "is_tension": false
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should offshore processing be time-limited to 6 months, with return to the UK if unresolved?",
+              "is_tension": false
+            }
+          },
+          "no": {
+            "layer": 4,
+            "text": "Should the UK withdraw from the 1951 Refugee Convention and write its own domestic asylum law?",
+            "is_tension": true,
+            "yes": {
+              "layer": 5,
+              "text": "Should the new domestic law define 'refugee' more narrowly than the 1951 convention?",
+              "is_tension": true
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should the UK instead push to modernise the 1951 convention through multilateral negotiation?",
+              "is_tension": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Should the UK implement a strict points-based immigration system",
+      "slug": "should-the-uk-implement-a-strict-points-based-immigration-system",
+      "subtopicSlug": "labour-market",
+      "layer": 1,
+      "text": "Should the UK implement a strict points-based immigration system that prioritises high-skilled workers?",
+      "is_tension": false,
+      "yes": {
+        "layer": 2,
+        "text": "Should the salary threshold for skilled worker visas be set above £50,000 per year?",
+        "is_tension": true,
+        "yes": {
+          "layer": 3,
+          "text": "Should the salary threshold be indexed to inflation automatically each year?",
+          "is_tension": false,
+          "yes": {
+            "layer": 4,
+            "text": "Should regional salary differences lower the threshold for jobs outside London?",
+            "is_tension": false,
+            "yes": {
+              "layer": 5,
+              "text": "Should the regional discount be up to 20% below the national threshold?",
+              "is_tension": false
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should a single national threshold apply regardless of region to prevent a race to the bottom?",
+              "is_tension": false
+            }
+          },
+          "no": {
+            "layer": 4,
+            "text": "Should the threshold be reviewed by an independent Migration Advisory Committee rather than set by ministers?",
+            "is_tension": false,
+            "yes": {
+              "layer": 5,
+              "text": "Should the committee's recommendations be binding, removing ministerial discretion entirely?",
+              "is_tension": true
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should the committee publish recommendations that ministers must respond to within 90 days?",
+              "is_tension": false
+            }
+          }
+        },
+        "no": {
+          "layer": 3,
+          "text": "Should the government create a fast-track visa for global talent in AI, life sciences, and green energy?",
+          "is_tension": false,
+          "yes": {
+            "layer": 4,
+            "text": "Should the fast-track visa include an automatic path to permanent residency after two years?",
+            "is_tension": false,
+            "yes": {
+              "layer": 5,
+              "text": "Should the two-year residency path also extend automatically to the visa holder's immediate family?",
+              "is_tension": false
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should permanent residency under the fast-track require proof of continued employment in the priority sector?",
+              "is_tension": false
+            }
+          },
+          "no": {
+            "layer": 4,
+            "text": "Should universities be allowed to sponsor global-talent visas directly without Home Office involvement?",
+            "is_tension": false,
+            "yes": {
+              "layer": 5,
+              "text": "Should universities that sponsor visas bear financial responsibility if the visa holder overstays?",
+              "is_tension": true
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should a central government talent agency manage all global-talent visas on behalf of institutions?",
+              "is_tension": false
+            }
+          }
+        }
+      },
+      "no": {
+        "layer": 2,
+        "text": "Should sectors with chronic shortages like healthcare and hospitality have dedicated visa routes outside any cap?",
+        "is_tension": false,
+        "yes": {
+          "layer": 3,
+          "text": "Should the shortage occupation list be determined by an independent body rather than the government?",
+          "is_tension": false,
+          "yes": {
+            "layer": 4,
+            "text": "Should trade unions have a seat on the independent body determining shortage occupations?",
+            "is_tension": false,
+            "yes": {
+              "layer": 5,
+              "text": "Should unions have a veto over adding new occupations to the shortage list?",
+              "is_tension": true
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should unions have advisory status only, with final decisions made by independent economists?",
+              "is_tension": false
+            }
+          },
+          "no": {
+            "layer": 4,
+            "text": "Should the shortage list be reviewed annually, with automatic removal if vacancy rates drop below 5%?",
+            "is_tension": false,
+            "yes": {
+              "layer": 5,
+              "text": "Should workers on shortage visas get automatic right to remain if their job is removed from the list?",
+              "is_tension": false
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should workers whose occupation falls off the shortage list get a 12-month window to find a qualifying role?",
+              "is_tension": false
+            }
+          }
+        },
+        "no": {
+          "layer": 3,
+          "text": "Should the government invest in training UK residents to fill shortage roles rather than creating more visa routes?",
+          "is_tension": false,
+          "yes": {
+            "layer": 4,
+            "text": "Should employers in shortage sectors be required to fund apprenticeships before hiring from abroad?",
+            "is_tension": false,
+            "yes": {
+              "layer": 5,
+              "text": "Should the ratio be one apprenticeship created for every two overseas workers hired?",
+              "is_tension": false
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should a levy on overseas hires fund a central training pool managed by sector skills councils?",
+              "is_tension": false
+            }
+          },
+          "no": {
+            "layer": 4,
+            "text": "Should the government allow full labour market access for workers from specific partner countries under reciprocal agreements?",
+            "is_tension": false,
+            "yes": {
+              "layer": 5,
+              "text": "Should a UK-EU youth mobility scheme be negotiated as a priority bilateral arrangement?",
+              "is_tension": false
+            },
+            "no": {
+              "layer": 5,
+              "text": "Should reciprocal access be limited to Commonwealth countries that accept UK retirees on equivalent terms?",
+              "is_tension": false
+            }
+          }
+        }
+      }
+    }
+  ]
 }

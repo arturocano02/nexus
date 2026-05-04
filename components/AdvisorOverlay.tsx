@@ -343,40 +343,11 @@ export default function AdvisorOverlay({
               />
             </div>
 
-            {/* Header: advisor name | submit CTA | mode toggle */}
-            <div className="shrink-0 px-4 pb-3 flex items-center justify-between gap-3">
+            {/* Header: advisor name | mode toggle */}
+            <div className="shrink-0 px-4 pb-2 flex items-center justify-between gap-3">
               <span style={{ fontSize: 14, fontWeight: 500, color: "#FFBF00", letterSpacing: "0.02em", flexShrink: 0 }}>
                 {advisorName}
               </span>
-
-              {/* Submit views CTA */}
-              <button
-                onClick={() => { if (unsubmittedCount > 0) { onOpenManifesto?.(); onClose(); } }}
-                className={unsubmittedCount > 0 ? "submit-pill-pulse" : ""}
-                style={{
-                  borderRadius: 999,
-                  padding: "5px 12px",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: "0.05em",
-                  textTransform: "uppercase",
-                  border: unsubmittedCount > 0
-                    ? "1px solid rgba(255,191,0,0.5)"
-                    : "1px solid rgba(255,255,255,0.08)",
-                  background: unsubmittedCount > 0
-                    ? "rgba(255,191,0,0.12)"
-                    : "transparent",
-                  color: unsubmittedCount > 0
-                    ? "#FFBF00"
-                    : "rgba(245,245,245,0.18)",
-                  cursor: unsubmittedCount > 0 ? "pointer" : "default",
-                  transition: "all 0.3s",
-                  whiteSpace: "nowrap",
-                  flexShrink: 0,
-                }}
-              >
-                {unsubmittedCount > 0 ? `${unsubmittedCount} view${unsubmittedCount > 1 ? "s" : ""} ready` : "No views yet"}
-              </button>
 
               {/* Mode toggle: mic / chat */}
               <div className="flex items-center gap-1 shrink-0">
@@ -412,6 +383,34 @@ export default function AdvisorOverlay({
                   </svg>
                 </button>
               </div>
+            </div>
+
+            {/* Submit views slim bar — always visible above conversation */}
+            <div className="shrink-0 px-4 pb-2 flex justify-end">
+              <button
+                onClick={() => { onOpenManifesto?.(); onClose(); }}
+                className={unsubmittedCount > 0 ? "submit-pill-pulse" : ""}
+                style={{
+                  borderRadius: 999,
+                  padding: "5px 14px",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  border: unsubmittedCount > 0
+                    ? "1px solid rgba(255,191,0,0.5)"
+                    : "1px solid rgba(255,255,255,0.08)",
+                  background: unsubmittedCount > 0
+                    ? "rgba(255,191,0,0.12)"
+                    : "transparent",
+                  color: unsubmittedCount > 0
+                    ? "#FFBF00"
+                    : "rgba(245,245,245,0.18)",
+                  cursor: "pointer",
+                  transition: "all 0.3s",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Submit views{unsubmittedCount > 0 ? ` (${unsubmittedCount})` : ""}
+              </button>
             </div>
 
             {/* ----------------------------------------------------------------

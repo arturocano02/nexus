@@ -166,6 +166,36 @@ h1, h2, h3, h4, h5, h6 {
   animation: submit-pill-pulse 2.2s ease-in-out infinite;
 }
 
+/* Custom amber confidence slider */
+.confidence-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+  width: 100%;
+}
+.confidence-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #FFBF00;
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(255,191,0,0.5);
+}
+.confidence-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #FFBF00;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 6px rgba(255,191,0,0.5);
+}
+
 /* Subtle starfield background for canvases that need depth */
 .starfield::before {
   content: "";

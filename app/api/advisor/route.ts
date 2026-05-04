@@ -24,6 +24,45 @@ export const dynamic = "force-dynamic";
 const MAX_HISTORY = 40;
 const KEEP_FIRST = 5;
 
+// -----------------------------------------------------------------------
+// Module-level taxonomy cache (persists across requests in same process)
+// -----------------------------------------------------------------------
+
+interface QuestionRow {
+  id: string;
+  category_id: string;
+  subtopic_id: string | null;
+  layer: number;
+  question_text: string;
+}
+
+interface CategoryRow {
+  id: string;
+  slug: string;
+  name: string;
+}
+
+let _questions: QuestionRow[] | null = null;
+let _categories: CategoryRow[] | null = null;
+
+async function loadTaxonomyCache(svc: ReturnType<typeof supabaseService>) {
+  if (_questions && _categories) return;
+  const [qRes, cRes] = await Promise.all([
+    svc
+      .from("questions")
+      .select("id, category_id, subtopic_id, layer, question_text")
+      .in("layer", [1, 2])
+      .order("layer"),
+    svc.from("taxonomy_categories").select("id, slug, name"),
+  ]);
+  if (qRes.data) _questions = qRes.data as QuestionRow[];
+  if (cRes.data) _categories = cRes.data as CategoryRow[];
+}
+
+// -----------------------------------------------------------------------
+// Conversation helpers
+// -----------------------------------------------------------------------
+
 function truncateHistory(msgs: ConversationMessage[]): ConversationMessage[] {
   if (msgs.length <= MAX_HISTORY) return msgs;
   return [...msgs.slice(0, KEEP_FIRST), ...msgs.slice(-(MAX_HISTORY - KEEP_FIRST))];
@@ -52,6 +91,12 @@ TOPIC TAGS: Only use these exact names as topic_tags, 1-3 max: ${TAXONOMY_CATEGO
 
 VIEW INFERENCE: When the user clearly takes a position, restate it briefly ("So you think X — right?") and mark in belief_updates on confirmation.
 
+CONFIDENCE SCORING for belief_updates:
+- 0.8–1.0: stated clearly and defended with reasons
+- 0.5–0.7: stated but uncertain or qualified ("I think", "maybe")
+- 0.3–0.5: vague, hedged, or partially contradicted
+- 0.1–0.3: highly uncertain, contradictory, or just speculating
+
 RESPONSE FORMAT: Valid JSON only. No text outside it. Max 80 words in message field.
 {"message":"reply (max 80 words, no em-dashes)","topic_tags":["Category"],"belief_updates":[{"topic_label":"label","summary":"one sentence","confidence_score":0.0,"raw_excerpt":"exact user quote","confirmation_status":"inferred"}]}
 
@@ -63,7 +108,6 @@ async function buildOpeningQuestion(
   svc: ReturnType<typeof supabaseService>,
   arenaContext?: { topic: string; for_args: string[]; against_args: string[] },
 ): Promise<AdvisorApiResponse> {
-  // Fetch high-tension topics to seed a specific opening question
   let seedTopic = "a major policy debate";
   if (arenaContext) {
     seedTopic = arenaContext.topic;
@@ -101,7 +145,6 @@ async function buildOpeningQuestion(
 
 function safeParseResponse(raw: string): AdvisorApiResponse | null {
   try {
-    // Extract JSON even if there's surrounding text
     const start = raw.indexOf("{");
     const end = raw.lastIndexOf("}");
     if (start < 0 || end <= start) return null;
@@ -117,6 +160,10 @@ function safeParseResponse(raw: string): AdvisorApiResponse | null {
   }
 }
 
+// -----------------------------------------------------------------------
+// Main POST handler
+// -----------------------------------------------------------------------
+
 export async function POST(req: NextRequest) {
   const supa = await supabaseServer();
   const { data: { user } } = await supa.auth.getUser();
@@ -130,6 +177,9 @@ export async function POST(req: NextRequest) {
 
   const svc = supabaseService();
   const now = new Date().toISOString();
+
+  // Load taxonomy cache (no-op if already loaded)
+  await loadTaxonomyCache(svc);
 
   // Load profile (for advisor_name)
   const { data: profile } = await svc
@@ -171,7 +221,6 @@ export async function POST(req: NextRequest) {
   // Opening question: no message yet
   // -----------------------------------------------------------------------
   if (body.message === null) {
-    // If conversation already has messages, return the last assistant message
     if (conversation.length > 0) {
       const lastAssistant = [...conversation].reverse().find(m => m.role === "assistant");
       if (lastAssistant) {
@@ -183,7 +232,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Fresh conversation — generate opener
     const opener = await buildOpeningQuestion(advisorName, svc, body.arena_context);
     const openerMsg: ConversationMessage = {
       role: "assistant",
@@ -207,7 +255,6 @@ export async function POST(req: NextRequest) {
   };
   conversation = [...conversation, userMsg];
 
-  // Build API history (truncated)
   const history = truncateHistory(conversation);
   const anthropicMessages = history.map(m => ({
     role: m.role as "user" | "assistant",
@@ -236,7 +283,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
-  // Append assistant message to conversation
   const assistantMsg: ConversationMessage = {
     role: "assistant",
     content: apiResponse.message,
@@ -246,16 +292,22 @@ export async function POST(req: NextRequest) {
   };
   conversation = [...conversation, assistantMsg];
 
-  // Persist conversation
   await saveConversation(svc, user.id, conversation, conversationId);
 
-  // Upsert user_views from belief_updates (fire-and-forget style)
+  // Fire-and-forget: upsert user_views, then classify into taxonomy
   upsertBeliefUpdates(svc, user.id, apiResponse.belief_updates).catch(
     err => console.warn("[advisor] belief upsert failed:", err)
+  );
+  classifyBeliefs(svc, user.id, apiResponse.belief_updates).catch(
+    err => console.warn("[advisor] classification failed:", err)
   );
 
   return NextResponse.json(apiResponse);
 }
+
+// -----------------------------------------------------------------------
+// Conversation persistence
+// -----------------------------------------------------------------------
 
 async function saveConversation(
   svc: ReturnType<typeof supabaseService>,
@@ -277,6 +329,10 @@ async function saveConversation(
   } catch { /* table may not exist yet */ }
 }
 
+// -----------------------------------------------------------------------
+// Belief upsert into user_views
+// -----------------------------------------------------------------------
+
 async function upsertBeliefUpdates(
   svc: ReturnType<typeof supabaseService>,
   userId: string,
@@ -290,7 +346,7 @@ async function upsertBeliefUpdates(
 
     const { data: existing } = await svc
       .from("user_views")
-      .select("id, raw_excerpts, submitted_to_arena")
+      .select("id, raw_excerpts, submitted_to_arena, user_overridden")
       .eq("user_id", userId)
       .eq("topic_label", upd.topic_label)
       .eq("is_deleted", false)
@@ -302,13 +358,13 @@ async function upsertBeliefUpdates(
       ? existing.raw_excerpts : [];
     if (upd.raw_excerpt) {
       excerpts.push(upd.raw_excerpt);
-      excerpts.splice(0, Math.max(0, excerpts.length - 20)); // keep last 20
+      excerpts.splice(0, Math.max(0, excerpts.length - 20));
     }
 
     if (existing) {
       await svc.from("user_views").update({
         summary: upd.summary,
-        confidence_score: Math.max(0, Math.min(1, upd.confidence_score)),
+        ...(!existing.user_overridden && { confidence_score: Math.max(0, Math.min(1, upd.confidence_score)) }),
         raw_excerpts: excerpts,
         updated_at: now,
       }).eq("id", existing.id);
@@ -321,5 +377,316 @@ async function upsertBeliefUpdates(
         raw_excerpts: excerpts,
       });
     }
+  }
+}
+
+// -----------------------------------------------------------------------
+// Taxonomy classification pipeline
+// -----------------------------------------------------------------------
+
+async function classifyBeliefs(
+  svc: ReturnType<typeof supabaseService>,
+  userId: string,
+  updates: BeliefUpdate[],
+) {
+  if (!_questions || !_categories || !updates.length) return;
+  // Run classifications in parallel, ignore individual failures
+  await Promise.all(
+    updates.map(u => classifyBelief(svc, userId, u).catch(() => {}))
+  );
+  // Detect and save supporting / contradicting links between user_views
+  await detectAndSaveLinks(svc, userId, updates).catch(() => {});
+}
+
+async function classifyBelief(
+  svc: ReturnType<typeof supabaseService>,
+  userId: string,
+  belief: BeliefUpdate,
+) {
+  if (!_questions || !_categories) return;
+  if (!belief.topic_label || !belief.summary) return;
+
+  // Match category by name (case-insensitive)
+  const category = _categories.find(
+    c => c.name.toLowerCase() === belief.topic_label.toLowerCase()
+  );
+  if (!category) return;
+
+  // Get L1 + L2 questions for this category (max 6)
+  const candidates = _questions
+    .filter(q => q.category_id === category.id)
+    .slice(0, 6);
+  if (!candidates.length) return;
+
+  const questionsList = candidates
+    .map(q => `${q.id}: ${q.question_text}`)
+    .join("\n");
+
+  // Classification call — 150 token cap, separate from conversation
+  const resp = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 150,
+    messages: [{
+      role: "user",
+      content: `You are a political stance classifier. A user expressed this opinion: ${belief.summary}. Their exact words were: ${belief.raw_excerpt ?? belief.summary}. Here are political questions from our taxonomy relevant to the category ${belief.topic_label}:
+${questionsList}
+
+Which single question does this opinion most directly answer? Return JSON only:
+{"question_id":"<uuid from list>","stance":"yes","confidence":0.8,"core_argument":"<user argument in 15 words max>"}
+If none match well, return: {"question_id":null}`,
+    }],
+  });
+
+  const raw = resp.content.find(c => c.type === "text")?.text ?? "";
+  let result: {
+    question_id: string | null;
+    stance?: string;
+    confidence?: number;
+    core_argument?: string;
+  };
+  try {
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start < 0 || end <= start) return;
+    result = JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return;
+  }
+
+  if (!result.question_id) return;
+
+  // Validate the returned question_id is actually in our list
+  const question = candidates.find(q => q.id === result.question_id);
+  if (!question) return;
+
+  const stance = result.stance as "yes" | "no" | "abstain" | undefined;
+  if (!stance || !["yes", "no", "abstain"].includes(stance)) return;
+
+  // Take the higher of AI confidence and belief confidence_score
+  const confidence = Math.max(
+    Math.max(0, Math.min(1, result.confidence ?? 0)),
+    Math.max(0, Math.min(1, belief.confidence_score)),
+  );
+  const coreArgument = (result.core_argument ?? belief.summary).slice(0, 200);
+  const now = new Date().toISOString();
+
+  // Upsert inferred_positions by (user_id, question_id)
+  const { data: existing } = await svc
+    .from("inferred_positions")
+    .select("id, confidence, arguments_json")
+    .eq("user_id", userId)
+    .eq("question_id", result.question_id)
+    .maybeSingle();
+
+  const newArg = { text: coreArgument, ts: now };
+
+  if (existing) {
+    const existingConf = Number(existing.confidence ?? 0);
+    const existingArgs: { text: string; ts: string }[] = Array.isArray(existing.arguments_json)
+      ? existing.arguments_json : [];
+    const isDuplicate = existingArgs.some(a => a.text === coreArgument);
+    const args = isDuplicate ? existingArgs : [...existingArgs, newArg].slice(-5);
+
+    const update: Record<string, unknown> = { arguments_json: args, updated_at: now };
+    // Only promote stance/confidence if new classification is more confident
+    if (confidence > existingConf) {
+      update.stance = stance;
+      update.confidence = confidence;
+    }
+    await svc.from("inferred_positions").update(update).eq("id", existing.id);
+  } else {
+    await svc.from("inferred_positions").insert({
+      user_id: userId,
+      session_id: "advisor_extraction",
+      question_id: result.question_id,
+      category_id: category.id,
+      subtopic_id: question.subtopic_id ?? null,
+      stance,
+      confidence,
+      reasoning: belief.summary,
+      arguments_json: [newArg],
+    });
+  }
+
+  // Update collective_scores for this question
+  await updateCollectiveScores(svc, result.question_id, category.id);
+
+  // Sync public_nodes tension stats
+  await syncPublicNode(svc, category.id, category.name).catch(() => {});
+}
+
+// -----------------------------------------------------------------------
+// Sync public_nodes tension stats after classifyBelief
+// -----------------------------------------------------------------------
+
+async function syncPublicNode(
+  svc: ReturnType<typeof supabaseService>,
+  categoryId: string,
+  categoryName: string,
+) {
+  const { data: scores } = await svc
+    .from("collective_scores")
+    .select("yes_weighted_pct, total_responses, tension_flag")
+    .eq("category_id", categoryId);
+
+  if (!scores || !scores.length) return;
+
+  const totalResponses = scores.reduce((s, r) => s + (Number(r.total_responses) || 0), 0);
+  const hotCount = scores.filter(s => s.tension_flag === "hot" || s.tension_flag === "disputed").length;
+  const tensionCoefficient = scores.length > 0 ? hotCount / scores.length : 0;
+  const noiseSaturation = Math.min(1, totalResponses / 100);
+
+  const { data: existing } = await svc
+    .from("public_nodes")
+    .select("id")
+    .eq("category_id", categoryId)
+    .maybeSingle();
+
+  if (existing) {
+    await svc.from("public_nodes").update({ tension_coefficient: tensionCoefficient, noise_saturation: noiseSaturation }).eq("id", existing.id);
+  } else {
+    await svc.from("public_nodes").insert({
+      category_id: categoryId,
+      topic_label: categoryName,
+      tension_coefficient: tensionCoefficient,
+      noise_saturation: noiseSaturation,
+    });
+  }
+}
+
+// -----------------------------------------------------------------------
+// Detect supporting / contradicting links between user_views
+// -----------------------------------------------------------------------
+
+async function detectAndSaveLinks(
+  svc: ReturnType<typeof supabaseService>,
+  userId: string,
+  updates: BeliefUpdate[],
+) {
+  if (!updates.length) return;
+
+  const { data: allViews } = await svc
+    .from("user_views")
+    .select("id, topic_label, summary")
+    .eq("user_id", userId)
+    .eq("is_deleted", false)
+    .neq("summary", "");
+
+  if (!allViews || allViews.length < 2) return;
+
+  // Only process the first updated belief to cap AI calls
+  const upd = updates[0];
+  const viewA = allViews.find(v => v.topic_label === upd.topic_label);
+  if (!viewA?.summary) return;
+
+  const others = allViews.filter(v => v.id !== viewA.id).slice(0, 5);
+
+  await Promise.allSettled(
+    others.map(async (viewB) => {
+      if (!viewB.summary) return;
+
+      // Skip if any link already exists between this pair (either direction)
+      const [fwdRes, revRes] = await Promise.all([
+        svc.from("personal_links").select("id").eq("user_id", userId).eq("node_a_id", viewA.id).eq("node_b_id", viewB.id).maybeSingle(),
+        svc.from("personal_links").select("id").eq("user_id", userId).eq("node_a_id", viewB.id).eq("node_b_id", viewA.id).maybeSingle(),
+      ]);
+      if (fwdRes.data || revRes.data) return;
+
+      const resp = await anthropic.messages.create({
+        model: MODEL,
+        max_tokens: 80,
+        messages: [{
+          role: "user",
+          content: `Do these two political positions support or contradict each other?\nA (${viewA.topic_label}): ${viewA.summary}\nB (${viewB.topic_label}): ${viewB.summary}\nReturn JSON only: {"relationship":"supporting","strength":0.6}`,
+        }],
+      });
+
+      const raw = resp.content.find(c => c.type === "text")?.text ?? "";
+      const s = raw.indexOf("{"), e = raw.lastIndexOf("}");
+      if (s < 0 || e <= s) return;
+      let result: { relationship?: string; strength?: number };
+      try { result = JSON.parse(raw.slice(s, e + 1)); } catch { return; }
+
+      const relationship = result.relationship === "contradicting" ? "contradicting" : "supporting";
+      const strength = Math.max(0, Math.min(1, result.strength ?? 0.5));
+
+      await svc.from("personal_links").insert({
+        user_id: userId,
+        node_a_id: viewA.id,
+        node_b_id: viewB.id,
+        relationship,
+        strength,
+      });
+    })
+  );
+}
+
+// -----------------------------------------------------------------------
+// Aggregate collective_scores for a specific question
+// -----------------------------------------------------------------------
+
+async function updateCollectiveScores(
+  svc: ReturnType<typeof supabaseService>,
+  questionId: string,
+  categoryId: string,
+) {
+  const { data: positions } = await svc
+    .from("inferred_positions")
+    .select("stance, confidence, arguments_json")
+    .eq("question_id", questionId)
+    .not("stance", "is", null);
+
+  if (!positions || !positions.length) return;
+
+  const yes = positions.filter(p => p.stance === "yes");
+  const no = positions.filter(p => p.stance === "no");
+  const abstain = positions.filter(p => p.stance === "abstain");
+
+  const totalWeight = positions.reduce((s, p) => s + Number(p.confidence ?? 0.5), 0);
+  const yesWeight = yes.reduce((s, p) => s + Number(p.confidence ?? 0.5), 0);
+  const noWeight = no.reduce((s, p) => s + Number(p.confidence ?? 0.5), 0);
+
+  const yes_weighted_pct = totalWeight > 0 ? Math.round((yesWeight / totalWeight) * 100) : 50;
+  const no_weighted_pct = totalWeight > 0 ? Math.round((noWeight / totalWeight) * 100) : 50;
+
+  const diff = Math.abs(yes_weighted_pct - no_weighted_pct);
+  const tension_flag = diff < 10 ? "hot" : diff < 25 ? "disputed" : diff < 50 ? "contested" : "agreed";
+
+  // Top 3 yes/no arguments from highest-confidence positions
+  function topArgs(group: typeof yes) {
+    return group
+      .sort((a, b) => Number(b.confidence ?? 0) - Number(a.confidence ?? 0))
+      .slice(0, 3)
+      .map(p => {
+        const args: { text: string }[] = Array.isArray(p.arguments_json) ? p.arguments_json : [];
+        return args[args.length - 1]?.text ?? "";
+      })
+      .filter(Boolean);
+  }
+
+  const scoreData = {
+    question_id: questionId,
+    category_id: categoryId,
+    total_responses: positions.length,
+    yes_weighted_pct,
+    no_weighted_pct,
+    abstain_count: abstain.length,
+    tension_flag,
+    top_yes_args: topArgs(yes),
+    top_no_args: topArgs(no),
+    computed_at: new Date().toISOString(),
+  };
+
+  // Select-first upsert (partial index not supported by PostgREST upsert)
+  const { data: existingScore } = await svc
+    .from("collective_scores")
+    .select("id")
+    .eq("question_id", questionId)
+    .maybeSingle();
+
+  if (existingScore) {
+    await svc.from("collective_scores").update(scoreData).eq("id", existingScore.id);
+  } else {
+    await svc.from("collective_scores").insert(scoreData);
   }
 }

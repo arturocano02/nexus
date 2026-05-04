@@ -36,6 +36,7 @@ export interface Profile {
   country: string | null;
   avatar_url: string | null;
   advisor_name: string | null;
+  last_submitted_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -49,6 +50,7 @@ export interface UserView {
   raw_excerpts: string[];
   submitted_to_arena: boolean;
   submitted_at: string | null;
+  user_overridden: boolean;
   created_at: string;
   updated_at: string;
   is_deleted: boolean;
@@ -247,6 +249,8 @@ export interface MapNodeDatum {
   parentId?: string;
   /** Satellites are rendered smaller and orbit their parent */
   isSatellite?: boolean;
+  /** Inferred stance from taxonomy classification — drives stance dot indicator */
+  stance?: "yes" | "no" | "abstain" | null;
 }
 
 // -----------------------------------------------------------------------

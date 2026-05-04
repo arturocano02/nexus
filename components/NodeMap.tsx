@@ -19,6 +19,8 @@ export interface MapNodeDatum {
   /** If set, this node orbits around the parent category blob */
   parentId?: string;
   isSatellite?: boolean;
+  /** Inferred stance — renders as a small dot below the blob */
+  stance?: "yes" | "no" | "abstain" | null;
 }
 
 interface NodeMapProps {
@@ -221,6 +223,26 @@ function ThoughtBlob({
           </p>
         </div>
       </Html>
+
+      {/* Stance indicator dot — green yes / red no / gray abstain */}
+      {data.stance && (
+        <Html
+          position={[0, -(targetRadius + 0.28), 0]}
+          center
+          distanceFactor={7}
+          zIndexRange={[0, 9]}
+          style={{ pointerEvents: "none" }}
+        >
+          <div style={{
+            width: 7,
+            height: 7,
+            borderRadius: "50%",
+            background: data.stance === "yes" ? "#4ade80" : data.stance === "no" ? "#FF5A6A" : "#888780",
+            boxShadow: `0 0 6px ${data.stance === "yes" ? "#4ade80" : data.stance === "no" ? "#FF5A6A" : "#888780"}`,
+            border: "1px solid rgba(0,0,0,0.4)",
+          }} />
+        </Html>
+      )}
     </group>
   );
 }

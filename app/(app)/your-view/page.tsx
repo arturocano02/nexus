@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabaseBrowser } from "@/lib/supabase/browser";
@@ -9,11 +8,9 @@ import { useUser } from "@/lib/useUser";
 import AdvisorButton from "@/components/AdvisorButton";
 import AdvisorOverlay from "@/components/AdvisorOverlay";
 import ManifestoPanel from "@/components/ManifestoPanel";
-import type { TaxonomyCategory, MapNodeDatum, InferredPosition, UserView } from "@/lib/types";
+import type { MapNodeDatum, UserView, Link } from "@/lib/types";
 
 const NodeMap = dynamic(() => import("@/components/NodeMap"), { ssr: false });
-
-const GREY_BLOB = "#6868a0";
 
 // Read arena context dropped by the arena page when "Add your argument" was tapped
 function readArenaContext() {
@@ -27,14 +24,23 @@ function readArenaContext() {
   }
 }
 
+// -----------------------------------------------------------------------
+// Color from confidence_score (spec: amber ≥0.7, cyan 0.4–0.7, gray <0.4)
+// -----------------------------------------------------------------------
+function colorFromConfidence(score: number): string {
+  if (score >= 0.7) return "#FFBF00";
+  if (score >= 0.4) return "#00DCFF";
+  return "#888780";
+}
+
 export default function YourViewPage() {
   const { user, ready } = useUser();
-  const router = useRouter();
 
-  const [categories, setCategories] = useState<TaxonomyCategory[]>([]);
-  const [positions, setPositions] = useState<InferredPosition[]>([]);
+  // Primary data source: user_views
   const [userViews, setUserViews] = useState<UserView[]>([]);
-  const [viewsLoading, setViewsLoading] = useState(true);
+
+  // Stance lookup: topic_label → best inferred stance
+  const [stanceByTopic, setStanceByTopic] = useState<Map<string, "yes" | "no" | "abstain">>(new Map());
 
   // Advisor state
   const [advisorOpen, setAdvisorOpen] = useState(false);
@@ -44,12 +50,12 @@ export default function YourViewPage() {
   // Manifesto panel state (lifted so advisor overlay can open it)
   const [manifestoOpen, setManifestoOpen] = useState(false);
 
-  // Categories the user has spoken to — amber tint
-  const [touchedIds, setTouchedIds] = useState<Set<string>>(new Set());
+  // Personal links: supporting/contradicting arcs between user_views
+  const [personalLinks, setPersonalLinks] = useState<Link[]>([]);
 
   const supa = supabaseBrowser();
 
-  // Pick up arena context on mount (set by arena page "Add your argument")
+  // Pick up arena context on mount
   useEffect(() => {
     const ctx = readArenaContext();
     if (ctx) {
@@ -60,181 +66,184 @@ export default function YourViewPage() {
   }, []);
 
   // -----------------------------------------------------------------------
-  // Load categories
-  // -----------------------------------------------------------------------
-  useEffect(() => {
-    async function load() {
-      const { data } = await supa
-        .from("taxonomy_categories")
-        .select("id, slug, name, sort_order, created_at")
-        .order("sort_order");
-      if (data) {
-        setCategories(data.map((c: any) => ({ ...c, opening_question: null })) as TaxonomyCategory[]);
-      }
-    }
-    load();
-  }, []);
-
-  // -----------------------------------------------------------------------
-  // Load inferred positions
+  // Load user_views (primary globe data source) + realtime subscription
   // -----------------------------------------------------------------------
   useEffect(() => {
     if (!user) return;
-    async function loadPositions() {
-      try {
-        const { data, error } = await supa
-          .from("inferred_positions")
-          .select("*")
-          .eq("user_id", user!.id);
-        if (!error && data) {
-          setPositions(data as InferredPosition[]);
-          const prevCatIds = new Set(
-            (data as InferredPosition[]).map(p => p.category_id).filter(Boolean) as string[]
-          );
-          if (prevCatIds.size > 0) {
-            setTouchedIds(prev => new Set([...prev, ...prevCatIds]));
-          }
-        }
-      } catch { /* table not yet created */ }
-    }
-    loadPositions();
 
-    try {
-      const sid = `pos-${user.id}`;
-      const ch = supa
-        .channel(sid)
-        .on("postgres_changes", {
-          event: "*",
-          schema: "public",
-          table: "inferred_positions",
-          filter: `user_id=eq.${user.id}`,
-        }, () => loadPositions())
-        .subscribe();
-      return () => { supa.removeChannel(ch); };
-    } catch { /* ignore */ }
-  }, [user]);
-
-  // -----------------------------------------------------------------------
-  // Load user_views (for amber outline on submitted nodes)
-  // -----------------------------------------------------------------------
-  useEffect(() => {
-    if (!user) return;
-    (async () => {
+    async function loadViews() {
       try {
         const { data } = await supa
           .from("user_views")
-          .select("id, topic_label, submitted_to_arena, confidence_score")
-          .eq("user_id", user.id)
+          .select("*")
+          .eq("user_id", user!.id)
           .eq("is_deleted", false);
         if (data) setUserViews(data as UserView[]);
-      } catch { /* table may not exist */ }
-      setViewsLoading(false);
-    })();
-  }, [user]);
+      } catch { /* table may not exist yet */ }
+    }
+
+    loadViews();
+
+    // Realtime: insert/update → merge into state, soft-delete → remove
+    const ch = supa
+      .channel(`views-${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "user_views", filter: `user_id=eq.${user.id}` },
+        (payload: any) => {
+          const { eventType, new: next, old } = payload;
+          if (eventType === "INSERT") {
+            const v = next as UserView;
+            if (!v.is_deleted) setUserViews(prev => [...prev, v]);
+          } else if (eventType === "UPDATE") {
+            const v = next as UserView;
+            if (v.is_deleted) {
+              setUserViews(prev => prev.filter(x => x.id !== v.id));
+            } else {
+              setUserViews(prev => {
+                const idx = prev.findIndex(x => x.id === v.id);
+                if (idx >= 0) {
+                  const copy = [...prev];
+                  copy[idx] = v;
+                  return copy;
+                }
+                return [...prev, v];
+              });
+            }
+          } else if (eventType === "DELETE") {
+            setUserViews(prev => prev.filter(x => x.id !== old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { supa.removeChannel(ch); };
+  }, [user?.id]);
 
   // -----------------------------------------------------------------------
-  // Node tap — open advisor pre-loaded with that topic
+  // Load inferred_positions + taxonomy_categories for stance lookup
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    if (!user) return;
+
+    async function loadStances() {
+      try {
+        const [catRes, posRes] = await Promise.all([
+          supa.from("taxonomy_categories").select("id, name"),
+          supa
+            .from("inferred_positions")
+            .select("category_id, stance, confidence")
+            .eq("user_id", user!.id)
+            .not("stance", "is", null)
+            .neq("stance", "unclear"),
+        ]);
+
+        const categories: { id: string; name: string }[] = catRes.data ?? [];
+        const positions: { category_id: string; stance: string; confidence: number }[] = posRes.data ?? [];
+
+        // Best stance per category_id (highest confidence)
+        const bestByCategory = new Map<string, { stance: string; confidence: number }>();
+        for (const p of positions) {
+          if (!p.category_id) continue;
+          const existing = bestByCategory.get(p.category_id);
+          if (!existing || p.confidence > existing.confidence) {
+            bestByCategory.set(p.category_id, { stance: p.stance, confidence: p.confidence });
+          }
+        }
+
+        // Map category name (lowercased) → stance
+        const catIdByName = new Map(categories.map(c => [c.name.toLowerCase(), c.id]));
+        const map = new Map<string, "yes" | "no" | "abstain">();
+        for (const view of userViews) {
+          const catId = catIdByName.get(view.topic_label.toLowerCase());
+          if (!catId) continue;
+          const best = bestByCategory.get(catId);
+          if (best && ["yes", "no", "abstain"].includes(best.stance)) {
+            map.set(view.topic_label, best.stance as "yes" | "no" | "abstain");
+          }
+        }
+        setStanceByTopic(map);
+      } catch { /* tables may not exist yet */ }
+    }
+
+    loadStances();
+  }, [user?.id, userViews]);
+
+  // -----------------------------------------------------------------------
+  // Load personal_links for green/red arcs
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    if (!user) return;
+
+    async function loadLinks() {
+      try {
+        const { data } = await supa
+          .from("personal_links")
+          .select("id, node_a_id, node_b_id, relationship, strength, created_at")
+          .eq("user_id", user!.id);
+        if (!data) return;
+        setPersonalLinks(
+          data.map(l => ({
+            id: l.id,
+            node_a_id: `user_${l.node_a_id}`,
+            node_b_id: `user_${l.node_b_id}`,
+            similarity_score: l.strength,
+            particle_direction: "a_to_b" as const,
+            is_user_confirmed: false,
+            relationship_label: null,
+            arc_color: l.relationship === "supporting" ? "#22c55e" : "#FF5A6A",
+            last_seen_at: l.created_at,
+          }))
+        );
+      } catch { /* table may not exist yet */ }
+    }
+
+    loadLinks();
+  }, [user?.id]);
+
+  // -----------------------------------------------------------------------
+  // Node tap — open advisor pre-loaded with topic_label from the tapped view
   // -----------------------------------------------------------------------
   const handleNodeSelect = useCallback((id: string) => {
-    const cat = categories.find(c => c.id === id || id.startsWith("sat-"));
-    if (!cat) {
-      // Satellite node — find parent category
-      const subtopicId = id.replace("sat-", "");
-      const pos = positions.find(p => p.subtopic_id === subtopicId);
-      const parentCat = pos?.category_id
-        ? categories.find(c => c.id === pos.category_id)
-        : undefined;
-      if (parentCat) {
-        setAdvisorTopic(parentCat.name);
-        setTouchedIds(prev => new Set([...prev, parentCat.id]));
-      }
-    } else {
-      setAdvisorTopic(cat.name);
-      setTouchedIds(prev => new Set([...prev, cat.id]));
+    const viewId = id.replace("user_", "");
+    const view = userViews.find(v => v.id === viewId);
+    if (view) {
+      setAdvisorTopic(view.topic_label);
+      setArenaContext(null);
+      setAdvisorOpen(true);
     }
-    setArenaContext(null);
-    setAdvisorOpen(true);
-  }, [categories, positions]);
-
-  // Build set of submitted topic labels for amber outline
-  const submittedTopics = new Set(
-    userViews.filter(v => v.submitted_to_arena).map(v => v.topic_label)
-  );
+  }, [userViews]);
 
   // -----------------------------------------------------------------------
-  // Build globe nodes
+  // Build globe nodes from user_views
   // -----------------------------------------------------------------------
-  function buildNodes(): MapNodeDatum[] {
-    const byCategory = new Map<string, InferredPosition[]>();
-    for (const p of positions) {
-      if (!p.category_id) continue;
-      const arr = byCategory.get(p.category_id) ?? [];
-      arr.push(p);
-      byCategory.set(p.category_id, arr);
-    }
+  const nodes = useMemo((): MapNodeDatum[] => {
+    return userViews.map(view => {
+      const excerptCount = Array.isArray(view.raw_excerpts) ? view.raw_excerpts.length : 0;
+      // Size: 0.3 (0 excerpts) → 1.0 (10+ excerpts)
+      const weight = 0.3 + (Math.min(excerptCount, 10) / 10) * 0.7;
 
-    const STANCE_HEX: Record<string, string> = {
-      yes: "#00DCFF",
-      no: "#FF5A6A",
-      abstain: "#888780",
-    };
+      // Submitted nodes are always amber; others are confidence-colored
+      const hexColor = view.submitted_to_arena
+        ? "#FFBF00"
+        : colorFromConfidence(view.confidence_score);
 
-    const nodes: MapNodeDatum[] = [];
+      // Slightly boost conviction for submitted nodes so their glow is visually distinct
+      const conviction = view.submitted_to_arena
+        ? Math.max(view.confidence_score, 0.85)
+        : view.confidence_score;
 
-    for (const cat of categories) {
-      const catPos = byCategory.get(cat.id) ?? [];
-      const hasPositions = catPos.length > 0;
-      const isTouched = touchedIds.has(cat.id);
-      const conviction = hasPositions
-        ? Math.max(...catPos.map(p => p.confidence ?? 0.5))
-        : isTouched ? 0.35 : 0;
-
-      const deployedCount = catPos.filter(p => p.deployed_at).length;
-      const weight = hasPositions
-        ? Math.max(0.9, Math.min(1.4, 0.9 + deployedCount * 0.25))
-        : 1.0;
-
-      const isSubmittedToArena = submittedTopics.has(cat.name);
-
-      nodes.push({
-        id: cat.id,
-        label: cat.name,
+      return {
+        id: `user_${view.id}`,
+        label: view.topic_label,
         weight,
         conviction,
-        isOwn: hasPositions || isTouched,
-        hexColor: isSubmittedToArena
-          ? "#FFBF00"                                           // amber for submitted
-          : (hasPositions || isTouched) ? undefined : GREY_BLOB,
-      });
-
-      // Satellite blobs
-      const bySubtopic = new Map<string, InferredPosition>();
-      for (const p of catPos) {
-        if (!p.subtopic_id || !p.stance || p.stance === "unclear") continue;
-        const existing = bySubtopic.get(p.subtopic_id);
-        if (!existing || (p.confidence ?? 0) > (existing.confidence ?? 0)) {
-          bySubtopic.set(p.subtopic_id, p);
-        }
-      }
-
-      for (const [, p] of bySubtopic) {
-        const argCount = Array.isArray(p.arguments_json) ? p.arguments_json.length : 0;
-        const satWeight = Math.max(0.3, Math.min(0.9, 0.3 + argCount * 0.12));
-        nodes.push({
-          id: `sat-${p.subtopic_id}`,
-          label: p.stance === "yes" ? "YES" : p.stance === "no" ? "NO" : "ABSTAIN",
-          weight: satWeight,
-          conviction: p.confidence ?? 0.5,
-          parentId: cat.id,
-          isSatellite: true,
-          isOwn: true,
-          hexColor: STANCE_HEX[p.stance!] ?? GREY_BLOB,
-        });
-      }
-    }
-
-    return nodes;
-  }
+        hexColor,
+        isOwn: true,
+        stance: stanceByTopic.get(view.topic_label) ?? null,
+      };
+    });
+  }, [userViews, stanceByTopic]);
 
   // -----------------------------------------------------------------------
   // Loading skeleton
@@ -278,7 +287,8 @@ export default function YourViewPage() {
 
       {/* 3D Globe */}
       <NodeMap
-        nodes={buildNodes()}
+        nodes={nodes}
+        links={personalLinks}
         onSelect={handleNodeSelect}
         radius={2.8}
         cameraDistance={11}
@@ -298,17 +308,28 @@ export default function YourViewPage() {
             Your political map
           </p>
           {[
-            { color: "#FFBF00", label: "Submitted" },
-            { color: "#6868a0", label: "Unspoken" },
-            { color: "#00DCFF", label: "Yes" },
-            { color: "#FF5A6A", label: "No" },
-            { color: "#888780", label: "Abstain" },
+            { color: "#FFBF00", label: "High / Submitted" },
+            { color: "#00DCFF", label: "Medium confidence" },
+            { color: "#888780", label: "Low confidence" },
           ].map(({ color, label }) => (
             <div key={label} className="flex items-center gap-1.5">
               <div className="w-1.5 h-1.5 rounded-full" style={{ background: color, boxShadow: `0 0 5px ${color}88` }} />
               <span className="text-[8px] font-bold tracking-widest" style={{ color: color + "77" }}>{label}</span>
             </div>
           ))}
+          {/* Stance dots */}
+          <div className="mt-1 flex flex-col gap-1">
+            {[
+              { color: "#4ade80", label: "Yes stance" },
+              { color: "#FF5A6A", label: "No stance" },
+              { color: "#888780", label: "Abstain" },
+            ].map(({ color, label }) => (
+              <div key={label} className="flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full border border-black/40" style={{ background: color, boxShadow: `0 0 4px ${color}` }} />
+                <span className="text-[8px] font-bold tracking-widest" style={{ color: color + "77" }}>{label}</span>
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* Center: Manifesto button */}
@@ -318,11 +339,16 @@ export default function YourViewPage() {
             open={manifestoOpen}
             onOpen={() => setManifestoOpen(true)}
             onClose={() => setManifestoOpen(false)}
-            onViewsChanged={() => {
-              if (!user) return;
-              supa.from("user_views").select("id, topic_label, submitted_to_arena, confidence_score")
-                .eq("user_id", user.id).eq("is_deleted", false)
-                .then(({ data }) => { if (data) setUserViews(data as UserView[]); });
+            onDeployed={(submitted) => {
+              setUserViews(prev => {
+                const updated = [...prev];
+                for (const s of submitted) {
+                  const idx = updated.findIndex(v => v.id === s.id);
+                  if (idx >= 0) updated[idx] = s;
+                  else updated.push(s);
+                }
+                return updated;
+              });
             }}
           />
         </div>
@@ -332,7 +358,7 @@ export default function YourViewPage() {
           Centre hint
       ---------------------------------------------------------------- */}
       <AnimatePresence>
-        {!advisorOpen && (
+        {!advisorOpen && nodes.length === 0 && (
           <motion.div
             key="centre-prompt"
             initial={{ opacity: 0, y: 8 }}
@@ -372,7 +398,7 @@ export default function YourViewPage() {
         onClose={() => setAdvisorOpen(false)}
         initialTopic={advisorTopic}
         arenaContext={arenaContext}
-        unsubmittedCount={userViews.filter(v => !v.submitted_to_arena).length}
+        unsubmittedCount={userViews.filter(v => !v.submitted_to_arena && !v.is_deleted).length}
         onOpenManifesto={() => setManifestoOpen(true)}
       />
     </div>
