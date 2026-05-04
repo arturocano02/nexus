@@ -166,12 +166,16 @@ export default function AdvisorOverlay({
   const [loading, setLoading] = useState(false);
   const [initiated, setInitiated] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const voiceScrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const autoSendRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Scroll to bottom on new messages
+  // Scroll to bottom on new messages (text mode + voice scroll)
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (voiceScrollRef.current) {
+      voiceScrollRef.current.scrollTo({ top: voiceScrollRef.current.scrollHeight, behavior: "smooth" });
+    }
   }, [messages]);
 
   // Focus input when switching to text mode
@@ -345,34 +349,33 @@ export default function AdvisorOverlay({
                 {advisorName}
               </span>
 
-              {/* Submit views CTA — always visible, lights up when there are views */}
+              {/* Submit views CTA */}
               <button
-                onClick={() => { onOpenManifesto?.(); }}
-                className={unsubmittedCount > 0 ? "advisor-pulse-alert" : ""}
+                onClick={() => { if (unsubmittedCount > 0) { onOpenManifesto?.(); onClose(); } }}
+                className={unsubmittedCount > 0 ? "submit-pill-pulse" : ""}
                 style={{
-                  flex: 1,
                   borderRadius: 999,
-                  padding: "6px 14px",
-                  fontSize: 11,
+                  padding: "5px 12px",
+                  fontSize: 10,
                   fontWeight: 600,
-                  letterSpacing: "0.04em",
+                  letterSpacing: "0.05em",
+                  textTransform: "uppercase",
                   border: unsubmittedCount > 0
-                    ? "1px solid rgba(255,191,0,0.55)"
-                    : "1px solid rgba(255,255,255,0.1)",
+                    ? "1px solid rgba(255,191,0,0.5)"
+                    : "1px solid rgba(255,255,255,0.08)",
                   background: unsubmittedCount > 0
-                    ? "rgba(255,191,0,0.15)"
-                    : "rgba(255,255,255,0.03)",
+                    ? "rgba(255,191,0,0.12)"
+                    : "transparent",
                   color: unsubmittedCount > 0
                     ? "#FFBF00"
-                    : "rgba(245,245,245,0.2)",
+                    : "rgba(245,245,245,0.18)",
                   cursor: unsubmittedCount > 0 ? "pointer" : "default",
                   transition: "all 0.3s",
                   whiteSpace: "nowrap",
+                  flexShrink: 0,
                 }}
               >
-                {unsubmittedCount > 0
-                  ? `Submit views (${unsubmittedCount})`
-                  : "No views yet"}
+                {unsubmittedCount > 0 ? `${unsubmittedCount} view${unsubmittedCount > 1 ? "s" : ""} ready` : "No views yet"}
               </button>
 
               {/* Mode toggle: mic / chat */}
@@ -415,60 +418,69 @@ export default function AdvisorOverlay({
                 Voice mode
             ---------------------------------------------------------------- */}
             {mode === "voice" && (
-              <div
-                className="flex-1 flex flex-col items-center justify-center gap-5 px-5 overflow-y-auto min-h-0"
-                style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}
-              >
-                <VoiceBlob isActive={isListening} />
+              <div className="flex-1 min-h-0 flex flex-col items-center px-5">
+                {/* Orb — always visible at top */}
+                <div className="shrink-0 pt-2 pb-4">
+                  <VoiceBlob isActive={isListening} />
+                </div>
 
-                <div className="text-center max-w-xs space-y-2">
+                {/* Scrollable transcript + AI response */}
+                <div
+                  ref={voiceScrollRef}
+                  className="flex-1 min-h-0 overflow-y-auto w-full text-center space-y-3 scrollbar-hide"
+                >
                   {speech.interim && (
-                    <p className="text-sm italic" style={{ color: "rgba(255,191,0,0.7)" }}>
+                    <p className="text-sm italic px-2" style={{ color: "rgba(255,191,0,0.75)" }}>
                       {speech.interim}
                     </p>
                   )}
                   {(() => {
                     const lastAI = [...messages].reverse().find(m => m.role === "assistant" && m.content !== "__thinking__");
                     return lastAI ? (
-                      <p className="text-sm leading-relaxed" style={{ color: "rgba(245,245,245,0.7)" }}>
-                        {lastAI.content.slice(0, 220)}{lastAI.content.length > 220 ? "…" : ""}
+                      <p className="text-sm leading-relaxed px-2" style={{ color: "rgba(245,245,245,0.82)" }}>
+                        {renderMessage(lastAI.content)}
                       </p>
                     ) : null;
                   })()}
                 </div>
 
-                <button
-                  onClick={toggleMic}
-                  disabled={!speech.supported}
-                  className="w-16 h-16 rounded-full flex items-center justify-center transition-all shrink-0"
-                  style={{
-                    background: isListening ? "rgba(255,191,0,0.15)" : "rgba(255,191,0,0.08)",
-                    border: isListening ? "2px solid rgba(255,191,0,0.6)" : "2px solid rgba(255,191,0,0.25)",
-                    boxShadow: isListening ? "0 0 30px rgba(255,191,0,0.25)" : "none",
-                  }}
+                {/* Mic button + status — always at bottom */}
+                <div
+                  className="shrink-0 flex flex-col items-center gap-3 pt-4"
+                  style={{ paddingBottom: "max(20px, env(safe-area-inset-bottom))" }}
                 >
-                  {isListening ? (
-                    <motion.svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-                      stroke="#FFBF00" strokeWidth="2.2" strokeLinecap="round"
-                      animate={{ scale: [1, 1.15, 1] }}
-                      transition={{ duration: 0.7, repeat: Infinity }}
-                    >
-                      <rect x="9" y="2" width="6" height="12" rx="3" />
-                      <path d="M5 10a7 7 0 0014 0M12 19v3M8 22h8" />
-                    </motion.svg>
-                  ) : (
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-                      stroke="rgba(255,191,0,0.7)" strokeWidth="2.2" strokeLinecap="round">
-                      <rect x="9" y="2" width="6" height="12" rx="3" />
-                      <path d="M5 10a7 7 0 0014 0M12 19v3M8 22h8" />
-                    </svg>
-                  )}
-                </button>
-
-                <p className="text-[10px] tracking-widest uppercase shrink-0"
-                  style={{ color: "rgba(245,245,245,0.2)" }}>
-                  {isListening ? "Listening..." : loading ? "Thinking..." : "Tap to speak"}
-                </p>
+                  <button
+                    onClick={toggleMic}
+                    disabled={!speech.supported}
+                    className="w-16 h-16 rounded-full flex items-center justify-center transition-all"
+                    style={{
+                      background: isListening ? "rgba(255,191,0,0.15)" : "rgba(255,191,0,0.08)",
+                      border: isListening ? "2px solid rgba(255,191,0,0.6)" : "2px solid rgba(255,191,0,0.25)",
+                      boxShadow: isListening ? "0 0 30px rgba(255,191,0,0.25)" : "none",
+                    }}
+                  >
+                    {isListening ? (
+                      <motion.svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                        stroke="#FFBF00" strokeWidth="2.2" strokeLinecap="round"
+                        animate={{ scale: [1, 1.15, 1] }}
+                        transition={{ duration: 0.7, repeat: Infinity }}
+                      >
+                        <rect x="9" y="2" width="6" height="12" rx="3" />
+                        <path d="M5 10a7 7 0 0014 0M12 19v3M8 22h8" />
+                      </motion.svg>
+                    ) : (
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                        stroke="rgba(255,191,0,0.7)" strokeWidth="2.2" strokeLinecap="round">
+                        <rect x="9" y="2" width="6" height="12" rx="3" />
+                        <path d="M5 10a7 7 0 0014 0M12 19v3M8 22h8" />
+                      </svg>
+                    )}
+                  </button>
+                  <p className="text-[10px] tracking-widest uppercase"
+                    style={{ color: "rgba(245,245,245,0.2)" }}>
+                    {isListening ? "Listening..." : loading ? "Thinking..." : "Tap to speak"}
+                  </p>
+                </div>
               </div>
             )}
 

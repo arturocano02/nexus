@@ -28,23 +28,25 @@ export default function ManifestoPanel({ open, onOpen, onClose, onViewsChanged }
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Load views when panel opens
+  // Reload views every time panel opens
   useEffect(() => {
     if (!open || !user) return;
+    setViews([]);
+    setEditingId(null);
     (async () => {
       setLoading(true);
       try {
-        const { data } = await supa
+        const { data, error } = await supa
           .from("user_views")
           .select("*")
           .eq("user_id", user.id)
           .eq("is_deleted", false)
           .order("confidence_score", { ascending: false });
-        if (data) setViews(data as UserView[]);
+        if (!error && data) setViews(data as UserView[]);
       } catch { /* ok */ }
       setLoading(false);
     })();
-  }, [open, user]);
+  }, [open, user?.id]);
 
   function showToast(msg: string, duration = 3000) {
     if (toastTimer.current) clearTimeout(toastTimer.current);
