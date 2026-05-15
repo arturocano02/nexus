@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import type { ReviewItem } from "@/lib/types";
 
@@ -29,6 +30,7 @@ interface ContradictionFlag {
 }
 
 export default function ReviewPanel({ open, sessionId, onClose, onSubmitted }: ReviewPanelProps) {
+  const router = useRouter();
   const [items, setItems] = useState<ReviewItem[] | null>(null);
   const [phase, setPhase] = useState<"loading" | "review" | "submitting" | "done">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -139,7 +141,8 @@ export default function ReviewPanel({ open, sessionId, onClose, onSubmitted }: R
         setTimeout(() => {
           onSubmitted();
           onClose();
-        }, 1000);
+          router.push("/arena");
+        }, 1400);
       } else {
         const d = await res.json();
         setError(d.error ?? "Submission failed. Please try again.");
@@ -397,13 +400,16 @@ function ReviewCard({
       </div>
 
       {/* Question — prominent */}
-      <div className="px-5 pb-4">
+      <div className="px-5 pb-3">
+        <p className="text-[9px] uppercase tracking-[0.2em] font-bold mb-1.5" style={{ color: "rgba(255,191,0,0.4)" }}>
+          AI inferred your answer to:
+        </p>
         <p className="text-sm leading-relaxed text-secondary/90 font-medium">
           {item.question_text}
         </p>
         {item.reasoning && (
           <p className="text-[10px] text-secondary/35 mt-2 leading-relaxed italic">
-            AI: {item.reasoning.slice(0, 120)}{item.reasoning.length > 120 ? "…" : ""}
+            "{item.reasoning.slice(0, 140)}{item.reasoning.length > 140 ? "…" : ""}"
           </p>
         )}
       </div>

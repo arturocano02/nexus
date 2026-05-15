@@ -174,22 +174,28 @@ export async function GET(req: NextRequest) {
 
   const categoryIds = [...new Set(positions.map((p: any) => p.category_id).filter(Boolean))];
   const subtopicIds = [...new Set(positions.map((p: any) => p.subtopic_id).filter(Boolean))];
+  const questionIds = [...new Set(positions.map((p: any) => p.question_id).filter(Boolean))];
 
-  const [catRes, subRes] = await Promise.all([
+  const [catRes, subRes, qRes] = await Promise.all([
     svc.from("taxonomy_categories").select("id, name").in("id", categoryIds),
     svc.from("taxonomy_subtopics").select("id, name, latent_question_text").in("id", subtopicIds),
+    questionIds.length > 0
+      ? svc.from("questions").select("id, question_text").in("id", questionIds)
+      : Promise.resolve({ data: [] }),
   ]);
 
   const catMap = new Map((catRes.data ?? []).map((c: any) => [c.id, c.name]));
   const subMap = new Map((subRes.data ?? []).map((s: any) => [s.id, s]));
+  const qMap   = new Map((qRes.data ?? []).map((q: any) => [q.id, q.question_text as string]));
 
   const items: ReviewItem[] = positions
     .filter((p: any) => p.subtopic_id)
     .map((p: any) => {
       const sub = subMap.get(p.subtopic_id) as any;
       const subtopicName: string = sub?.name ?? "Unknown";
-      // Use latent_question_text if set, otherwise turn the subtopic name into a natural question
+      // Priority: actual inferred question node > latent_question_text > pattern fallback
       const questionText: string =
+        (p.question_id && qMap.get(p.question_id)) ??
         sub?.latent_question_text ??
         subtopicToQuestion(subtopicName, catMap.get(p.category_id) ?? "");
 
