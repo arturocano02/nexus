@@ -24,13 +24,15 @@ function readArenaContext() {
   }
 }
 
-// -----------------------------------------------------------------------
-// Color from confidence_score (spec: amber ≥0.7, cyan 0.4–0.7, gray <0.4)
-// -----------------------------------------------------------------------
+// Color = intensity of conviction. All personal nodes stay in the amber family;
+// brightness encodes how strongly the user feels — bright gold → dim ochre → near-black.
 function colorFromConfidence(score: number): string {
-  if (score >= 0.7) return "#FFBF00";
-  if (score >= 0.4) return "#00DCFF";
-  return "#888780";
+  const s = Math.max(0, Math.min(1, score));
+  if (s >= 0.78) return "#FFBF00"; // bright amber
+  if (s >= 0.60) return "#D4900A"; // warm amber
+  if (s >= 0.42) return "#9A630A"; // dark amber
+  if (s >= 0.25) return "#5E3D0A"; // very dim amber-brown
+  return "#3A2608";                // near-black amber (barely a flicker)
 }
 
 export default function YourViewPage() {
@@ -50,8 +52,10 @@ export default function YourViewPage() {
   // Manifesto panel state (lifted so advisor overlay can open it)
   const [manifestoOpen, setManifestoOpen] = useState(false);
 
-  // Personal links: supporting/contradicting arcs between user_views
-  const [personalLinks, setPersonalLinks] = useState<Link[]>([]);
+  // Raw personal_links rows from DB; processed into Link objects via useMemo below
+  const [rawLinks, setRawLinks] = useState<any[]>([]);
+  // Link clicked on globe → show explanation overlay
+  const [selectedLink, setSelectedLink] = useState<Link | null>(null);
 
   const supa = supabaseBrowser();
 
@@ -128,38 +132,59 @@ export default function YourViewPage() {
 
     async function loadStances() {
       try {
-        const [catRes, posRes] = await Promise.all([
+        const [catRes, subRes, posRes] = await Promise.all([
           supa.from("taxonomy_categories").select("id, name"),
+          supa.from("taxonomy_subtopics").select("id, name"),
           supa
             .from("inferred_positions")
-            .select("category_id, stance, confidence")
+            .select("category_id, subtopic_id, stance, confidence")
             .eq("user_id", user!.id)
             .not("stance", "is", null)
             .neq("stance", "unclear"),
         ]);
 
         const categories: { id: string; name: string }[] = catRes.data ?? [];
-        const positions: { category_id: string; stance: string; confidence: number }[] = posRes.data ?? [];
+        const subtopics: { id: string; name: string }[] = subRes.data ?? [];
+        const positions: { category_id: string; subtopic_id: string | null; stance: string; confidence: number }[] = posRes.data ?? [];
 
-        // Best stance per category_id (highest confidence)
+        // Best stance per category_id and per subtopic_id (highest confidence wins)
         const bestByCategory = new Map<string, { stance: string; confidence: number }>();
+        const bestBySubtopic = new Map<string, { stance: string; confidence: number }>();
         for (const p of positions) {
-          if (!p.category_id) continue;
-          const existing = bestByCategory.get(p.category_id);
-          if (!existing || p.confidence > existing.confidence) {
-            bestByCategory.set(p.category_id, { stance: p.stance, confidence: p.confidence });
+          if (p.category_id) {
+            const ex = bestByCategory.get(p.category_id);
+            if (!ex || p.confidence > ex.confidence)
+              bestByCategory.set(p.category_id, { stance: p.stance, confidence: p.confidence });
+          }
+          if (p.subtopic_id) {
+            const ex = bestBySubtopic.get(p.subtopic_id);
+            if (!ex || p.confidence > ex.confidence)
+              bestBySubtopic.set(p.subtopic_id, { stance: p.stance, confidence: p.confidence });
           }
         }
 
-        // Map category name (lowercased) → stance
         const catIdByName = new Map(categories.map(c => [c.name.toLowerCase(), c.id]));
+        const subIdByName = new Map(subtopics.map(s => [s.name.toLowerCase(), s.id]));
+
         const map = new Map<string, "yes" | "no" | "abstain">();
         for (const view of userViews) {
-          const catId = catIdByName.get(view.topic_label.toLowerCase());
-          if (!catId) continue;
-          const best = bestByCategory.get(catId);
-          if (best && ["yes", "no", "abstain"].includes(best.stance)) {
-            map.set(view.topic_label, best.stance as "yes" | "no" | "abstain");
+          const label = view.topic_label.toLowerCase();
+          // Subtopic name takes priority (most specific match)
+          const subId = subIdByName.get(label);
+          if (subId) {
+            const best = bestBySubtopic.get(subId);
+            if (best && ["yes", "no", "abstain"].includes(best.stance)) {
+              map.set(view.topic_label, best.stance as "yes" | "no" | "abstain");
+              continue;
+            }
+          }
+          // Fall back to category name
+          const catId = catIdByName.get(label);
+          if (catId) {
+            const best = bestByCategory.get(catId);
+            if (best && ["yes", "no", "abstain"].includes(best.stance)) {
+              map.set(view.topic_label, best.stance as "yes" | "no" | "abstain");
+            }
           }
         }
         setStanceByTopic(map);
@@ -170,36 +195,54 @@ export default function YourViewPage() {
   }, [user?.id, userViews]);
 
   // -----------------------------------------------------------------------
-  // Load personal_links for green/red arcs
+  // Load personal_links raw rows (processed into Link objects below)
   // -----------------------------------------------------------------------
   useEffect(() => {
     if (!user) return;
-
     async function loadLinks() {
       try {
         const { data } = await supa
           .from("personal_links")
           .select("id, node_a_id, node_b_id, relationship, strength, created_at")
           .eq("user_id", user!.id);
-        if (!data) return;
-        setPersonalLinks(
-          data.map(l => ({
-            id: l.id,
-            node_a_id: `user_${l.node_a_id}`,
-            node_b_id: `user_${l.node_b_id}`,
-            similarity_score: l.strength,
-            particle_direction: "a_to_b" as const,
-            is_user_confirmed: false,
-            relationship_label: null,
-            arc_color: l.relationship === "supporting" ? "#22c55e" : "#FF5A6A",
-            last_seen_at: l.created_at,
-          }))
-        );
+        if (data) setRawLinks(data);
       } catch { /* table may not exist yet */ }
     }
-
     loadLinks();
   }, [user?.id]);
+
+  // Enrich raw links with labels and AI-generated explanation summaries
+  const personalLinks = useMemo((): Link[] => {
+    return rawLinks.map(l => {
+      const viewA = userViews.find(v => v.id === l.node_a_id);
+      const viewB = userViews.find(v => v.id === l.node_b_id);
+      const aLabel = viewA?.topic_label ?? "this view";
+      const bLabel = viewB?.topic_label ?? "this view";
+      const isSupporting = l.relationship === "supporting";
+      const link_summary = isSupporting
+        ? `Your positions on ${aLabel} and ${bLabel} point in the same direction — they reinforce each other and suggest consistent underlying values.`
+        : `Your positions on ${aLabel} and ${bLabel} pull against each other — holding both creates a tension in your political framework that may need resolving.`;
+      return {
+        id: l.id,
+        node_a_id: `user_${l.node_a_id}`,
+        node_b_id: `user_${l.node_b_id}`,
+        similarity_score: l.strength,
+        particle_direction: "a_to_b" as const,
+        is_user_confirmed: false,
+        relationship_label: (isSupporting ? "builds on" : "contradicts") as any,
+        arc_color: isSupporting ? "#22c55e" : "#FF5A6A",
+        link_summary,
+        last_seen_at: l.created_at,
+      };
+    });
+  }, [rawLinks, userViews]);
+
+  // -----------------------------------------------------------------------
+  // Arc tap — show explanation overlay for the clicked link
+  // -----------------------------------------------------------------------
+  const handleLinkSelect = useCallback((link: Link) => {
+    setSelectedLink(link);
+  }, []);
 
   // -----------------------------------------------------------------------
   // Node tap — open advisor pre-loaded with topic_label from the tapped view
@@ -219,18 +262,18 @@ export default function YourViewPage() {
   // -----------------------------------------------------------------------
   const nodes = useMemo((): MapNodeDatum[] => {
     return userViews.map(view => {
+      // Size = conversation volume: excerpts (conversation depth) + summary word count
       const excerptCount = Array.isArray(view.raw_excerpts) ? view.raw_excerpts.length : 0;
-      // Size: 0.3 (0 excerpts) → 1.0 (10+ excerpts)
-      const weight = 0.3 + (Math.min(excerptCount, 10) / 10) * 0.7;
+      const summaryWords = (view.summary || "").split(/\s+/).filter(Boolean).length;
+      const volume = Math.min(1, excerptCount / 6 + summaryWords / 60);
+      const weight = 0.25 + volume * 0.75;
 
-      // Submitted nodes are always amber; others are confidence-colored
-      const hexColor = view.submitted_to_arena
-        ? "#FFBF00"
-        : colorFromConfidence(view.confidence_score);
+      // Color = intensity of feeling (amber spectrum: bright → dim based on confidence)
+      const hexColor = colorFromConfidence(view.confidence_score);
 
-      // Slightly boost conviction for submitted nodes so their glow is visually distinct
+      // Conviction drives glow intensity — submitted views get a floor boost
       const conviction = view.submitted_to_arena
-        ? Math.max(view.confidence_score, 0.85)
+        ? Math.max(view.confidence_score, 0.82)
         : view.confidence_score;
 
       return {
@@ -290,6 +333,7 @@ export default function YourViewPage() {
         nodes={nodes}
         links={personalLinks}
         onSelect={handleNodeSelect}
+        onSelectLink={handleLinkSelect}
         radius={2.8}
         cameraDistance={11}
         emptyHint="Tap your advisor to start"
@@ -393,6 +437,50 @@ export default function YourViewPage() {
         unsubmittedCount={userViews.filter(v => !v.submitted_to_arena && !v.is_deleted).length}
         onOpenManifesto={() => setManifestoOpen(true)}
       />
+
+      {/* ----------------------------------------------------------------
+          Link explanation overlay — shown when an arc is clicked
+      ---------------------------------------------------------------- */}
+      <AnimatePresence>
+        {selectedLink && (
+          <motion.div
+            key="link-explanation"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            className="absolute bottom-0 inset-x-0 z-30 flex justify-center pointer-events-none"
+            style={{ paddingBottom: "calc(100px + max(16px, env(safe-area-inset-bottom)))" }}
+          >
+            <div
+              className="pointer-events-auto mx-4 rounded-2xl px-5 py-4 max-w-sm w-full"
+              style={{
+                background: "rgba(6,8,22,0.97)",
+                border: `1px solid ${selectedLink.arc_color ?? "#FFBF00"}44`,
+                boxShadow: `0 8px 32px rgba(0,0,0,0.9), 0 0 20px ${selectedLink.arc_color ?? "#FFBF00"}18`,
+              }}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span
+                  className="font-display text-[9px] font-bold tracking-[0.25em] uppercase"
+                  style={{ color: selectedLink.arc_color ?? "#FFBF00" }}
+                >
+                  {selectedLink.arc_color === "#22c55e" ? "Strengthens" : "Contradicts"}
+                </span>
+                <button
+                  onClick={() => setSelectedLink(null)}
+                  className="text-white/30 hover:text-white/70 transition-colors text-sm leading-none"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="text-white/75 text-[12px] leading-relaxed">
+                {selectedLink.link_summary ?? "These two views are connected."}
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

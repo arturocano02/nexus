@@ -65,15 +65,15 @@ function colorFromConviction(c: number, isArena: boolean): string {
   return `#${mix.getHexString()}`;
 }
 
-// nodeRadius = 0.3 + (wordCount / maxWordCount) * 0.7   (range 0.3..1.0)
+// nodeRadius scales 0.28–0.92 based on relative weight (conversation volume)
 function radiusFromWeight(weight: number, maxWeight: number): number {
   const ratio = maxWeight > 0 ? Math.min(1, weight / maxWeight) : 0;
-  return 0.25 + ratio * 0.65;
+  return 0.28 + ratio * 0.64;
 }
 
 function glowIntensity(confidence: number, isArena: boolean): number {
-  // Wider glow range. 0 confidence is a matte ghost sphere. 1.0 is white hot.
-  if (!isArena) return 0.05 + Math.max(0, Math.min(1, confidence)) * 3.5;
+  // Wide glow range: matte ghost at 0 conviction, white-hot at 1.0
+  if (!isArena) return 0.1 + Math.max(0, Math.min(1, confidence)) * 4.2;
   return 0.2 + Math.max(0, Math.min(1, confidence)) * 1.5;
 }
 
@@ -173,7 +173,7 @@ function ThoughtBlob({
           distort={isVortexing ? 0.8 : distortionAmount}
           speed={isVortexing ? 6 : motionSpeed}
           emissive={hexColor}
-          emissiveIntensity={(data.pulsing ? 3 : 1.4) * (hovered ? 1.3 : 1)}
+          emissiveIntensity={(data.pulsing ? 3 : (0.7 + data.conviction * 1.8)) * (hovered ? 1.3 : 1)}
           // Matte surface: metalness 1 + roughness 0 was reflecting every
           // neighboring blob's pointLight as sharp specular dots, which looked
           // like white sparkles crawling across the blobs. Going full diffuse
@@ -473,14 +473,19 @@ function Arc({
   });
 
   const relationshipText = useMemo(() => {
-    return (link.relationship_label || "related").toUpperCase();
-  }, [link.relationship_label]);
+    if (link.arc_color === "#22c55e" || link.relationship_label === "builds on") return "STRENGTHENS";
+    if (link.arc_color === "#FF5A6A" || link.relationship_label === "contradicts") return "CONTRADICTS";
+    const label = link.relationship_label || "";
+    if (label === "challenges") return "CONTRADICTS";
+    return label ? label.toUpperCase() : "RELATED";
+  }, [link.arc_color, link.relationship_label]);
+
+  const [tooltipOpen, setTooltipOpen] = useState(false);
 
   return (
     <group>
-      {/* 
-        Native WebGL <line>. Guaranteed dot-free razor-thin 1px rendering. 
-        Additive blending makes it pop like a laser rather than a thick tube.
+      {/*
+        Native WebGL <line>. Guaranteed dot-free razor-thin 1px rendering.
       */}
       <line
         onClick={(e) => {
@@ -503,31 +508,54 @@ function Arc({
           transparent
           opacity={0}
           depthWrite={false}
-          // Normal blending: additive was stacking overlapping arcs into
-          // a solid cyan beam across the screen.
           blending={THREE.NormalBlending}
         />
       </line>
 
       <Html position={midpoint} center distanceFactor={12} zIndexRange={[0, 4]} occlude={false}>
-        <button
-          ref={labelRef as any}
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelectLink?.(link);
-          }}
-          className="px-2 py-1 font-display text-[9px] font-bold tracking-[0.2em] uppercase whitespace-nowrap transition-all hover:scale-110 pointer-events-auto rounded-sm"
-          style={{
-            color: targetColor,
-            background: "#0c101c", // Solid dark distinct background
-            border: `1px solid ${targetColor}44`,
-            boxShadow: `0 4px 12px rgba(0,0,0,0.8), 0 0 10px ${targetColor}22`,
-            opacity: 0,
-            transition: "color 300ms ease, opacity 200ms ease",
-          }}
-        >
-          {relationshipText}
-        </button>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+          <button
+            ref={labelRef as any}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectLink?.(link);
+            }}
+            onMouseEnter={() => link.link_summary && setTooltipOpen(true)}
+            onMouseLeave={() => setTooltipOpen(false)}
+            className="px-2 py-1 font-display text-[9px] font-bold tracking-[0.2em] uppercase whitespace-nowrap transition-all hover:scale-110 pointer-events-auto rounded-sm"
+            style={{
+              color: targetColor,
+              background: "#0c101c",
+              border: `1px solid ${targetColor}44`,
+              boxShadow: `0 4px 12px rgba(0,0,0,0.8), 0 0 10px ${targetColor}22`,
+              opacity: 0,
+              transition: "color 300ms ease, opacity 200ms ease",
+            }}
+          >
+            {relationshipText}
+          </button>
+
+          {tooltipOpen && link.link_summary && (
+            <div
+              className="pointer-events-none"
+              style={{
+                background: "rgba(6,8,22,0.96)",
+                border: `1px solid ${targetColor}33`,
+                borderRadius: 8,
+                padding: "8px 12px",
+                maxWidth: 220,
+                fontSize: 10,
+                lineHeight: 1.5,
+                color: "rgba(255,255,255,0.85)",
+                boxShadow: `0 8px 24px rgba(0,0,0,0.9), 0 0 12px ${targetColor}22`,
+                textAlign: "center",
+                whiteSpace: "normal",
+              }}
+            >
+              {link.link_summary}
+            </div>
+          )}
+        </div>
       </Html>
     </group>
   );
@@ -545,7 +573,7 @@ function NodeField({
   maxWeight,
   isArena,
 }: NodeMapProps & { maxWeight: number }) {
-  const nodeStates = useRef(new Map<string, { pos: THREE.Vector3; vel: THREE.Vector3 }>());
+  const nodeStates = useRef(new Map<string, { pos: THREE.Vector3; vel: THREE.Vector3; floatPhase: number }>());
   const [, setTick] = useState(0);
   const camera = useRef<THREE.Camera | null>(null);
 
@@ -562,7 +590,11 @@ function NodeField({
           radius * Math.sin(theta) * Math.sin(phi),
           radius * Math.cos(phi),
         );
-        nodeStates.current.set(n.id, { pos, vel: new THREE.Vector3() });
+        nodeStates.current.set(n.id, {
+          pos,
+          vel: new THREE.Vector3(),
+          floatPhase: Math.random() * Math.PI * 2,
+        });
       }
     });
     // Purge stale positions from merged / deleted nodes so arcs can never
@@ -577,9 +609,10 @@ function NodeField({
     if (dt > 0.1) return;
     const t = state.clock.getElapsedTime();
     const isExploding = physicsBoost && (t % 4 > 2.5);
-    const repulsion = 16 * (physicsBoost ? (isExploding ? 80 : -40) : 1);
-    const attraction = 0.55 * (physicsBoost ? 18 : 1);
-    const gravity = physicsBoost ? (isExploding ? 0.02 : 1.8) : 0.07;
+    // Normal mode: low repulsion + stronger gravity → nodes cluster, don't drift apart
+    const repulsion = physicsBoost ? (isExploding ? 1280 : -640) : 3.5;
+    const attraction = 0.38 * (physicsBoost ? 18 : 1);
+    const gravity = physicsBoost ? (isExploding ? 0.02 : 1.8) : 0.16;
 
     // Separate category nodes from satellite nodes
     const categoryNodes = nodes.filter(n => !n.isSatellite);
@@ -648,8 +681,8 @@ function NodeField({
       const diff = new THREE.Vector3().subVectors(stateB.pos, stateA.pos);
       const sim = Number(link.similarity_score || 0.5);
 
-      // Magnetic resting distance: Strong connections pull tight.
-      const restingDistance = Math.max(0.5, 10 - (sim * 12));
+      // Linked nodes pull toward each other but keep a comfortable gap
+      const restingDistance = Math.max(0.5, 5 - sim * 4);
 
       const force = diff
         .normalize()
@@ -662,7 +695,16 @@ function NodeField({
 
     nodeStates.current.forEach((state) => {
       state.pos.add(state.vel.clone().multiplyScalar(dt * (physicsBoost ? 3 : 1)));
-      state.vel.multiplyScalar(physicsBoost ? 0.94 : 0.86);
+      // Gentle per-node float — unique phase so each blob drifts independently
+      if (!physicsBoost) {
+        const fp = state.floatPhase;
+        const amp = 0.007;
+        state.pos.x += Math.sin(t * 0.21 + fp) * amp;
+        state.pos.y += Math.cos(t * 0.17 + fp * 1.4) * amp;
+        state.pos.z += Math.sin(t * 0.13 + fp * 0.8) * amp;
+      }
+      // High damping in normal mode: velocity dies fast → no runaway drift
+      state.vel.multiplyScalar(physicsBoost ? 0.94 : 0.97);
     });
 
     setTick((k) => (k + 1) % 1_000_000);

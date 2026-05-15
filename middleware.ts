@@ -4,7 +4,7 @@ import { createServerClient } from "@supabase/ssr";
 // Routes that don't require authentication
 const PUBLIC_PATHS = ["/login", "/signup", "/signup/complete"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Always allow public auth pages, API routes, and Next.js internals
