@@ -5,140 +5,140 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { useUser } from "@/lib/useUser";
-import type { UserView } from "@/lib/types";
 
 interface ManifestoPanelProps {
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
-  onDeployed?: (submitted: UserView[]) => void;
+  onDeployed?: (count: number) => void;
 }
 
-type PendingView = UserView & { _removing?: boolean };
+interface PendingCard {
+  id: string;
+  question_id: string;
+  category_id: string | null;
+  question_text: string;
+  stance: "yes" | "no" | "abstain";
+  core_argument: string;
+  confidence: number; // 0..1
+  _excluded?: boolean;
+}
 
 export default function ManifestoPanel({ open, onOpen, onClose, onDeployed }: ManifestoPanelProps) {
-  const [views, setViews] = useState<PendingView[]>([]);
+  const [cards, setCards] = useState<PendingCard[]>([]);
   const [loading, setLoading] = useState(false);
-  const [hasNew, setHasNew] = useState(true);
   const [deploying, setDeploying] = useState(false);
   const [deployed, setDeployed] = useState(false);
-  const [toast, setToast] = useState<{ msg: string; undoId?: string } | null>(null);
   const [mounted, setMounted] = useState(false);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const removeTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const { user } = useUser();
   const supa = supabaseBrowser();
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     if (!open || !user) return;
-    setViews([]);
+    setCards([]);
     setDeployed(false);
-    loadNewViews();
+    loadPending();
   }, [open, user?.id]);
 
-  async function loadNewViews() {
+  async function loadPending() {
     setLoading(true);
     try {
-      const { data: profile } = await supa
-        .from("profiles")
-        .select("last_submitted_at")
-        .eq("id", user!.id)
-        .maybeSingle();
-
-      const lastAt = (profile as any)?.last_submitted_at ?? null;
-
-      let query = supa
-        .from("user_views")
-        .select("*")
+      // Fetch undeployed inferred positions that have a question_id
+      const { data: positions } = await supa
+        .from("inferred_positions")
+        .select("id, question_id, category_id, stance, confidence, core_argument")
         .eq("user_id", user!.id)
-        .eq("is_deleted", false)
-        .eq("submitted_to_arena", false)
-        .order("confidence_score", { ascending: false });
+        .is("deployed_at", null)
+        .not("question_id", "is", null)
+        .order("confidence", { ascending: false });
 
-      if (lastAt) query = (query as any).gt("created_at", lastAt);
+      if (!positions?.length) { setLoading(false); return; }
 
-      const { data } = await query;
-      const rows = (data ?? []) as PendingView[];
-      setViews(rows);
-      setHasNew(rows.length > 0);
+      // Fetch question texts in one query
+      const questionIds = positions.map((p: any) => p.question_id);
+      const { data: questions } = await supa
+        .from("questions")
+        .select("id, question_text")
+        .in("id", questionIds);
+
+      const qMap = new Map((questions ?? []).map((q: any) => [q.id, q.question_text]));
+
+      const loaded: PendingCard[] = positions.map((p: any) => ({
+        id: p.id,
+        question_id: p.question_id,
+        category_id: p.category_id ?? null,
+        question_text: qMap.get(p.question_id) ?? "Unknown question",
+        stance: (p.stance as "yes" | "no" | "abstain") ?? "abstain",
+        core_argument: p.core_argument ?? "",
+        confidence: Math.max(0, Math.min(1, Number(p.confidence ?? 0.5))),
+      }));
+
+      setCards(loaded);
     } catch { /* ok */ }
     setLoading(false);
   }
 
-  function showToast(msg: string, undoId?: string) {
+  function updateCard(id: string, patch: Partial<PendingCard>) {
+    setCards(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
+  }
+
+  function excludeCard(id: string) {
+    setCards(prev => prev.map(c => c.id === id ? { ...c, _excluded: true } : c));
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast({ msg, undoId });
-    toastTimer.current = setTimeout(() => setToast(null), 3500);
-  }
-
-  async function saveSummary(id: string, summary: string) {
-    setViews(prev => prev.map(v => v.id === id ? { ...v, summary } : v));
-    await supa.from("user_views").update({ summary }).eq("id", id);
-  }
-
-  async function updateConfidence(id: string, score: number) {
-    setViews(prev => prev.map(v => v.id === id ? { ...v, confidence_score: score } : v));
-    await supa.from("user_views").update({ confidence_score: score, user_overridden: true }).eq("id", id);
-  }
-
-  function removeView(id: string) {
-    setViews(prev => prev.map(v => v.id === id ? { ...v, _removing: true } : v));
-    showToast("Removed. Tap to undo.", id);
-    const t = setTimeout(async () => {
-      await supa.from("user_views").update({ is_deleted: true }).eq("id", id);
-      setViews(prev => prev.filter(v => v.id !== id));
-      removeTimers.current.delete(id);
-    }, 3500);
-    removeTimers.current.set(id, t);
-  }
-
-  function undoRemove(id: string) {
-    const t = removeTimers.current.get(id);
-    if (t) clearTimeout(t);
-    removeTimers.current.delete(id);
-    setViews(prev => prev.map(v => v.id === id ? { ...v, _removing: false } : v));
-    setToast(null);
+    toastTimer.current = setTimeout(() => {}, 0);
   }
 
   async function deployAll() {
-    const active = views.filter(v => !v._removing);
+    const active = cards.filter(c => !c._excluded);
     if (!active.length || deploying) return;
     setDeploying(true);
     try {
-      const res = await fetch("/api/submit-views", { method: "POST" });
-      const data = await res.json();
-      if (res.ok && Array.isArray(data.submitted)) {
+      const res = await fetch("/api/submit-views", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          positions: active.map(c => ({
+            id: c.id,
+            question_id: c.question_id,
+            category_id: c.category_id,
+            stance: c.stance,
+            core_argument: c.core_argument,
+            confidence: c.confidence,
+          })),
+        }),
+      });
+      if (res.ok) {
         setDeployed(true);
-        onDeployed?.(data.submitted as UserView[]);
+        onDeployed?.(active.length);
         setTimeout(() => { onClose(); setDeployed(false); }, 2200);
       }
     } catch { /* ok */ }
     setDeploying(false);
   }
 
-  const activeViews = views.filter(v => !v._removing);
+  const activeCards = cards.filter(c => !c._excluded);
+  const hasAny = cards.length > 0;
 
   const panel = (
     <AnimatePresence>
       {open && (
         <>
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{ position: "fixed", inset: 0, zIndex: 195, background: "rgba(0,0,20,0.55)", backdropFilter: "blur(4px)" }}
             onClick={onClose}
           />
 
-          {/* Panel slides down from top */}
           <motion.div
             initial={{ y: "-100%" }} animate={{ y: 0 }} exit={{ y: "-100%" }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
             style={{
               position: "fixed", top: 0, left: 0, right: 0,
               zIndex: 205, margin: "0 auto", maxWidth: "42rem", width: "100%",
-              height: "82dvh", display: "flex", flexDirection: "column",
+              height: "84dvh", display: "flex", flexDirection: "column",
               background: "rgba(4,4,36,0.96)",
               backdropFilter: "blur(24px)",
               borderRadius: "0 0 20px 20px",
@@ -151,7 +151,7 @@ export default function ManifestoPanel({ open, onOpen, onClose, onDeployed }: Ma
                 <div>
                   <p style={{ fontSize: 15, fontWeight: 700, color: "#FFBF00" }}>Submit views</p>
                   <p style={{ fontSize: 11, color: "rgba(245,245,245,0.3)", marginTop: 2 }}>
-                    Review and deploy your positions to the arena.
+                    Review your inferred positions before deploying to the arena.
                   </p>
                 </div>
                 <button onClick={onClose} style={{ color: "rgba(245,245,245,0.3)", fontSize: 20, lineHeight: 1, background: "none", border: "none", cursor: "pointer", padding: 4 }}>✕</button>
@@ -166,38 +166,34 @@ export default function ManifestoPanel({ open, onOpen, onClose, onDeployed }: Ma
                 </p>
               )}
 
-              {!loading && !hasNew && (
+              {!loading && !hasAny && (
                 <div style={{ textAlign: "center", paddingTop: 56 }}>
                   <p style={{ fontSize: 16, marginBottom: 8 }}>🎯</p>
                   <p style={{ fontSize: 14, color: "rgba(245,245,245,0.55)", marginBottom: 6 }}>
-                    Nothing new since your last submission.
+                    No positions inferred yet.
                   </p>
                   <p style={{ fontSize: 12, color: "rgba(245,245,245,0.25)" }}>
                     Keep talking to your advisor.
                   </p>
-                  <button
-                    onClick={onClose}
-                    style={{ marginTop: 24, fontSize: 12, color: "rgba(255,191,0,0.6)", background: "none", border: "none", cursor: "pointer" }}
-                  >
+                  <button onClick={onClose} style={{ marginTop: 24, fontSize: 12, color: "rgba(255,191,0,0.6)", background: "none", border: "none", cursor: "pointer" }}>
                     Close
                   </button>
                 </div>
               )}
 
-              {!loading && hasNew && (
+              {!loading && hasAny && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingTop: 4, paddingBottom: 8 }}>
                   <AnimatePresence>
-                    {activeViews.map(view => (
-                      <ReviewCard
-                        key={view.id}
-                        view={view}
-                        onSaveSummary={summary => saveSummary(view.id, summary)}
-                        onConfidenceChange={score => updateConfidence(view.id, score)}
-                        onRemove={() => removeView(view.id)}
+                    {activeCards.map(card => (
+                      <PositionCard
+                        key={card.id}
+                        card={card}
+                        onChange={patch => updateCard(card.id, patch)}
+                        onExclude={() => excludeCard(card.id)}
                       />
                     ))}
                   </AnimatePresence>
-                  {activeViews.length === 0 && (
+                  {activeCards.length === 0 && hasAny && (
                     <p style={{ textAlign: "center", fontSize: 13, color: "rgba(245,245,245,0.25)", paddingTop: 32 }}>
                       All removed. Nothing to deploy.
                     </p>
@@ -207,11 +203,11 @@ export default function ManifestoPanel({ open, onOpen, onClose, onDeployed }: Ma
             </div>
 
             {/* Deploy button */}
-            {hasNew && !loading && (
+            {hasAny && !loading && (
               <div style={{ flexShrink: 0, padding: "12px 16px", paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
                 <button
                   onClick={deployAll}
-                  disabled={deploying || activeViews.length === 0 || deployed}
+                  disabled={deploying || activeCards.length === 0 || deployed}
                   style={{
                     width: "100%",
                     padding: "14px",
@@ -220,13 +216,13 @@ export default function ManifestoPanel({ open, onOpen, onClose, onDeployed }: Ma
                     fontWeight: 700,
                     letterSpacing: "0.02em",
                     border: "none",
-                    cursor: activeViews.length === 0 ? "default" : "pointer",
+                    cursor: activeCards.length === 0 ? "default" : "pointer",
                     background: deployed
                       ? "rgba(255,191,0,0.15)"
-                      : activeViews.length === 0
+                      : activeCards.length === 0
                         ? "rgba(255,255,255,0.06)"
                         : "#FFBF00",
-                    color: deployed || activeViews.length === 0 ? "rgba(255,191,0,0.5)" : "#1a0e00",
+                    color: deployed || activeCards.length === 0 ? "rgba(255,191,0,0.5)" : "#1a0e00",
                     opacity: deploying ? 0.7 : 1,
                     transition: "all 0.25s",
                     display: "flex",
@@ -244,12 +240,11 @@ export default function ManifestoPanel({ open, onOpen, onClose, onDeployed }: Ma
                       />
                       Deploying...
                     </>
-                  ) : `Deploy ${activeViews.length} view${activeViews.length !== 1 ? "s" : ""} to arena`}
+                  ) : `Deploy ${activeCards.length} position${activeCards.length !== 1 ? "s" : ""} to arena`}
                 </button>
               </div>
             )}
 
-            {/* Close handle */}
             <div style={{ flexShrink: 0, display: "flex", justifyContent: "center", paddingBottom: 10 }} onClick={onClose}>
               <div style={{ width: 36, height: 3, borderRadius: 2, background: "rgba(255,255,255,0.12)", cursor: "pointer" }} />
             </div>
@@ -259,35 +254,8 @@ export default function ManifestoPanel({ open, onOpen, onClose, onDeployed }: Ma
     </AnimatePresence>
   );
 
-  const toastEl = (
-    <AnimatePresence>
-      {toast && (
-        <motion.div
-          key="manifesto-toast"
-          initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ opacity: 0 }}
-          style={{
-            position: "fixed", bottom: 120, left: "50%", transform: "translateX(-50%)",
-            zIndex: 230, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 10,
-          }}
-          className="glass rounded-full px-4 py-2 text-sm"
-        >
-          <span>{toast.msg}</span>
-          {toast.undoId && (
-            <button
-              onClick={() => undoRemove(toast.undoId!)}
-              style={{ fontSize: 11, fontWeight: 600, color: "#FFBF00", background: "none", border: "none", cursor: "pointer" }}
-            >
-              Undo
-            </button>
-          )}
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
-
   return (
     <>
-      {/* "My manifesto" amber pill at top of screen */}
       <button
         onClick={onOpen}
         style={{
@@ -307,35 +275,30 @@ export default function ManifestoPanel({ open, onOpen, onClose, onDeployed }: Ma
         My manifesto
       </button>
 
-      {mounted && createPortal(<>{panel}{toastEl}</>, document.body)}
+      {mounted && createPortal(panel, document.body)}
     </>
   );
 }
 
 // -----------------------------------------------------------------------
-// Single review card
+// Single position card
 // -----------------------------------------------------------------------
-function ReviewCard({
-  view,
-  onSaveSummary,
-  onConfidenceChange,
-  onRemove,
+function PositionCard({
+  card,
+  onChange,
+  onExclude,
 }: {
-  view: PendingView;
-  onSaveSummary: (s: string) => void;
-  onConfidenceChange: (n: number) => void;
-  onRemove: () => void;
+  card: PendingCard;
+  onChange: (patch: Partial<PendingCard>) => void;
+  onExclude: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(view.summary);
-  const pct = Math.round(view.confidence_score * 100);
+  const pct = Math.round(card.confidence * 100);
 
-  const topicColor = pct >= 70 ? "#FFBF00" : pct >= 40 ? "#00DCFF" : "#888780";
-
-  function handleBlur() {
-    setEditing(false);
-    if (draft !== view.summary) onSaveSummary(draft);
-  }
+  const STANCES: { value: "yes" | "no" | "abstain"; label: string; color: string; bg: string }[] = [
+    { value: "yes",     label: "Yes",     color: "#FFBF00", bg: "rgba(255,191,0,0.15)" },
+    { value: "no",      label: "No",      color: "#FF5A6A", bg: "rgba(255,90,106,0.15)" },
+    { value: "abstain", label: "Abstain", color: "#888780", bg: "rgba(136,135,128,0.15)" },
+  ];
 
   return (
     <motion.div
@@ -352,53 +315,61 @@ function ReviewCard({
         gap: 10,
       }}
     >
-      {/* Topic pill */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{
-          display: "inline-block",
-          fontSize: 9,
-          fontWeight: 700,
-          letterSpacing: "0.18em",
-          textTransform: "uppercase",
-          color: topicColor,
-          background: topicColor + "18",
-          border: `1px solid ${topicColor}30`,
-          borderRadius: 999,
-          padding: "3px 10px",
-        }}>
-          {view.topic_label}
-        </span>
+      {/* Question text + remove */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: "rgba(245,245,245,0.9)", lineHeight: 1.45, flex: 1 }}>
+          {card.question_text}
+        </p>
         <button
-          onClick={onRemove}
-          style={{ fontSize: 11, color: "rgba(255,90,106,0.55)", background: "none", border: "none", cursor: "pointer", padding: "2px 4px" }}
+          onClick={onExclude}
+          style={{ fontSize: 11, color: "rgba(255,90,106,0.55)", background: "none", border: "none", cursor: "pointer", padding: "2px 4px", flexShrink: 0 }}
         >
           Remove
         </button>
       </div>
 
-      {/* Editable summary */}
-      {editing ? (
-        <textarea
-          value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onBlur={handleBlur}
-          autoFocus
-          rows={3}
-          style={{
-            width: "100%", fontSize: 13, lineHeight: 1.55,
-            color: "rgba(245,245,245,0.9)", background: "rgba(0,0,40,0.5)",
-            border: "1px solid rgba(255,191,0,0.25)", borderRadius: 10,
-            padding: "8px 10px", outline: "none", resize: "none",
-          }}
-        />
-      ) : (
-        <p
-          onClick={() => { setEditing(true); setDraft(view.summary); }}
-          style={{ fontSize: 13, color: "rgba(245,245,245,0.78)", lineHeight: 1.55, cursor: "text", minHeight: 20 }}
-        >
-          {view.summary || <span style={{ fontStyle: "italic", color: "rgba(245,245,245,0.3)" }}>Tap to add summary...</span>}
-        </p>
-      )}
+      {/* Stance toggle */}
+      <div style={{ display: "flex", gap: 6 }}>
+        {STANCES.map(s => {
+          const active = card.stance === s.value;
+          return (
+            <button
+              key={s.value}
+              onClick={() => onChange({ stance: s.value })}
+              style={{
+                flex: 1,
+                padding: "6px 0",
+                borderRadius: 8,
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.06em",
+                border: `1px solid ${active ? s.color + "60" : "rgba(255,255,255,0.08)"}`,
+                background: active ? s.bg : "transparent",
+                color: active ? s.color : "rgba(245,245,245,0.3)",
+                cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+            >
+              {s.label.toUpperCase()}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Editable core argument */}
+      <textarea
+        value={card.core_argument}
+        onChange={e => onChange({ core_argument: e.target.value })}
+        rows={2}
+        placeholder="Your argument (edit or leave as-is)..."
+        style={{
+          width: "100%", fontSize: 12, lineHeight: 1.5,
+          color: "rgba(245,245,245,0.78)", background: "rgba(0,0,40,0.4)",
+          border: "1px solid rgba(255,255,255,0.07)", borderRadius: 8,
+          padding: "8px 10px", outline: "none", resize: "none",
+          fontFamily: "inherit",
+        }}
+      />
 
       {/* Confidence slider */}
       <div>
@@ -407,7 +378,7 @@ function ReviewCard({
           min={0}
           max={100}
           value={pct}
-          onChange={e => onConfidenceChange(parseInt(e.target.value, 10) / 100)}
+          onChange={e => onChange({ confidence: parseInt(e.target.value, 10) / 100 })}
           className="confidence-slider"
           style={{
             background: `linear-gradient(to right, #FFBF00 ${pct}%, rgba(255,255,255,0.1) ${pct}%)`,
@@ -415,6 +386,7 @@ function ReviewCard({
         />
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
           <span style={{ fontSize: 9, color: "rgba(245,245,245,0.25)" }}>Less sure</span>
+          <span style={{ fontSize: 9, color: "rgba(245,245,245,0.25)" }}>{pct}%</span>
           <span style={{ fontSize: 9, color: "rgba(245,245,245,0.25)" }}>Very sure</span>
         </div>
       </div>

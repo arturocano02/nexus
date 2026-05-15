@@ -84,7 +84,7 @@ export default function ProfilePage() {
       try {
         const { data: positions } = await supa
           .from("inferred_positions")
-          .select("id, category_id, subtopic_id, stance, arguments_json, deployed_at, retracted_at")
+          .select("id, category_id, subtopic_id, question_id, stance, core_argument, arguments_json, deployed_at, retracted_at")
           .eq("user_id", user.id)
           .not("deployed_at", "is", null)
           .order("deployed_at", { ascending: false });
@@ -92,24 +92,41 @@ export default function ProfilePage() {
         if (positions && positions.length > 0) {
           const catIds = [...new Set(positions.map((p: any) => p.category_id).filter(Boolean))];
           const subIds = [...new Set(positions.map((p: any) => p.subtopic_id).filter(Boolean))];
-          const [{ data: cats }, { data: subs }] = await Promise.all([
+          const qIds   = [...new Set(positions.map((p: any) => p.question_id).filter(Boolean))];
+
+          const [{ data: cats }, { data: subs }, { data: qs }] = await Promise.all([
             supa.from("taxonomy_categories").select("id, name").in("id", catIds),
-            supa.from("taxonomy_subtopics").select("id, name, latent_question_text").in("id", subIds),
+            subIds.length
+              ? supa.from("taxonomy_subtopics").select("id, name, latent_question_text").in("id", subIds)
+              : Promise.resolve({ data: [] }),
+            qIds.length
+              ? supa.from("questions").select("id, question_text").in("id", qIds)
+              : Promise.resolve({ data: [] }),
           ]);
+
           const catMap = new Map((cats ?? []).map((c: any) => [c.id, c.name]));
           const subMap = new Map((subs ?? []).map((s: any) => [s.id, s]));
+          const qMap   = new Map((qs ?? []).map((q: any) => [q.id, q.question_text as string]));
+
           const rows: SubmittedArgument[] = positions
-            .filter((p: any) => p.subtopic_id)
+            .filter((p: any) => p.subtopic_id || p.question_id)
             .map((p: any) => {
               const sub = subMap.get(p.subtopic_id) as any;
+              const questionText = qMap.get(p.question_id)
+                ?? sub?.latent_question_text
+                ?? sub?.name
+                ?? "Unknown";
+              // Prefer core_argument (new column), fall back to arguments_json
+              const argument: string = p.core_argument
+                ?? (Array.isArray(p.arguments_json) && p.arguments_json.length > 0
+                  ? p.arguments_json[0].text ?? "" : "");
               return {
                 id: p.id,
                 category_name: catMap.get(p.category_id) ?? "Unknown",
-                subtopic_name: sub?.name ?? "Unknown",
-                question_text: sub?.latent_question_text ?? sub?.name ?? "Unknown",
+                subtopic_name: sub?.name ?? questionText,
+                question_text: questionText,
                 stance: p.stance ?? "unclear",
-                argument: Array.isArray(p.arguments_json) && p.arguments_json.length > 0
-                  ? p.arguments_json[0].text ?? "" : "",
+                argument,
                 deployed_at: p.deployed_at,
                 retracted_at: p.retracted_at,
               };

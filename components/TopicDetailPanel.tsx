@@ -61,7 +61,7 @@ async function loadCategoryPositions(
 ): Promise<PositionRow[]> {
   const { data: positions } = await supa
     .from("inferred_positions")
-    .select("id, subtopic_id, stance, confidence, reasoning, deployed_at, retracted_at, arguments_json")
+    .select("id, subtopic_id, question_id, stance, confidence, reasoning, core_argument, deployed_at, retracted_at, arguments_json")
     .eq("user_id", userId)
     .eq("category_id", categoryId)
     .order("created_at", { ascending: false });
@@ -69,32 +69,49 @@ async function loadCategoryPositions(
   if (!positions || positions.length === 0) return [];
 
   const subtopicIds = [...new Set(positions.map((p: any) => p.subtopic_id).filter(Boolean))];
+  const questionIds  = [...new Set(positions.map((p: any) => p.question_id).filter(Boolean))];
 
-  const [{ data: subtopics }, { data: questions }] = await Promise.all([
-    supa.from("taxonomy_subtopics").select("id, name, latent_question_text").in("id", subtopicIds),
-    supa.from("taxonomy_questions").select("subtopic_id, question_text").in("subtopic_id", subtopicIds).eq("depth_layer", 1),
+  const [{ data: subtopics }, { data: legacyQs }, { data: taxQs }] = await Promise.all([
+    subtopicIds.length
+      ? supa.from("taxonomy_subtopics").select("id, name, latent_question_text").in("id", subtopicIds)
+      : Promise.resolve({ data: [] }),
+    subtopicIds.length
+      ? supa.from("taxonomy_questions").select("subtopic_id, question_text").in("subtopic_id", subtopicIds).eq("depth_layer", 1)
+      : Promise.resolve({ data: [] }),
+    questionIds.length
+      ? supa.from("questions").select("id, question_text").in("id", questionIds)
+      : Promise.resolve({ data: [] }),
   ]);
 
-  const subMap = new Map((subtopics ?? []).map((s: any) => [s.id, s]));
-  const qMap = new Map((questions ?? []).map((q: any) => [q.subtopic_id, q.question_text]));
+  const subMap  = new Map((subtopics ?? []).map((s: any) => [s.id, s]));
+  const legQMap = new Map((legacyQs ?? []).map((q: any) => [q.subtopic_id, q.question_text as string]));
+  const taxQMap = new Map((taxQs ?? []).map((q: any) => [q.id, q.question_text as string]));
 
-  return positions.map((p: any) => {
-    const sub = subMap.get(p.subtopic_id) as any;
-    const args = Array.isArray(p.arguments_json) ? p.arguments_json : [];
-    return {
-      id: p.id,
-      subtopic_id: p.subtopic_id,
-      subtopic_name: sub?.name ?? "Unknown",
-      question_text: sub?.latent_question_text ?? qMap.get(p.subtopic_id) ?? sub?.name ?? "",
-      stance: p.stance,
-      confidence: p.confidence ?? 0.5,
-      reasoning: p.reasoning ?? null,
-      first_argument: args[0]?.text ?? null,
-      deployed_at: p.deployed_at,
-      retracted_at: p.retracted_at,
-      arguments_count: args.length,
-    };
-  });
+  return positions
+    .filter((p: any) => p.subtopic_id || p.question_id)
+    .map((p: any) => {
+      const sub = subMap.get(p.subtopic_id) as any;
+      const questionText = taxQMap.get(p.question_id)
+        ?? sub?.latent_question_text
+        ?? legQMap.get(p.subtopic_id)
+        ?? sub?.name
+        ?? "";
+      const args = Array.isArray(p.arguments_json) ? p.arguments_json : [];
+      const firstArg: string | null = p.core_argument ?? args[0]?.text ?? null;
+      return {
+        id: p.id,
+        subtopic_id: p.subtopic_id ?? p.question_id ?? "",
+        subtopic_name: sub?.name ?? questionText,
+        question_text: questionText,
+        stance: p.stance,
+        confidence: p.confidence ?? 0.5,
+        reasoning: p.reasoning ?? null,
+        first_argument: firstArg,
+        deployed_at: p.deployed_at,
+        retracted_at: p.retracted_at,
+        arguments_count: args.length || (p.core_argument ? 1 : 0),
+      };
+    });
 }
 
 // -----------------------------------------------------------------------

@@ -207,6 +207,18 @@ export interface CollectiveScore {
   computed_at: string;
 }
 
+export interface QuestionAggregate {
+  question_id: UUID;
+  question_text: string;
+  yes_count: number;
+  no_count: number;
+  abstain_count: number;
+  yes_weighted_pct: number;
+  no_weighted_pct: number;
+  top_yes_args: string[];
+  top_no_args: string[];
+}
+
 export interface CategoryAggregate {
   category_id: UUID;
   category_slug: string;
@@ -219,6 +231,7 @@ export interface CategoryAggregate {
   top_yes_args: string[];
   top_no_args: string[];
   subtopics: SubtopicAggregate[];
+  questions: QuestionAggregate[];
 }
 
 export interface SubtopicAggregate {

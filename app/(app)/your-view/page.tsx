@@ -339,16 +339,8 @@ export default function YourViewPage() {
             open={manifestoOpen}
             onOpen={() => setManifestoOpen(true)}
             onClose={() => setManifestoOpen(false)}
-            onDeployed={(submitted) => {
-              setUserViews(prev => {
-                const updated = [...prev];
-                for (const s of submitted) {
-                  const idx = updated.findIndex(v => v.id === s.id);
-                  if (idx >= 0) updated[idx] = s;
-                  else updated.push(s);
-                }
-                return updated;
-              });
+            onDeployed={() => {
+              // Positions deployed — no user_views sync needed with new pipeline
             }}
           />
         </div>

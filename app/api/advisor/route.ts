@@ -294,11 +294,11 @@ export async function POST(req: NextRequest) {
 
   await saveConversation(svc, user.id, conversation, conversationId);
 
-  // Fire-and-forget: upsert user_views, then classify into taxonomy
+  // Fire-and-forget: upsert user_views, then classify raw turn into taxonomy questions
   upsertBeliefUpdates(svc, user.id, apiResponse.belief_updates).catch(
     err => console.warn("[advisor] belief upsert failed:", err)
   );
-  classifyBeliefs(svc, user.id, apiResponse.belief_updates).catch(
+  classifyTurn(svc, user.id, body.message, apiResponse.message, apiResponse.topic_tags).catch(
     err => console.warn("[advisor] classification failed:", err)
   );
 
@@ -381,138 +381,109 @@ async function upsertBeliefUpdates(
 }
 
 // -----------------------------------------------------------------------
-// Taxonomy classification pipeline
+// Taxonomy classification pipeline — one call per conversation turn
 // -----------------------------------------------------------------------
 
-async function classifyBeliefs(
+async function classifyTurn(
   svc: ReturnType<typeof supabaseService>,
   userId: string,
-  updates: BeliefUpdate[],
-) {
-  if (!_questions || !_categories || !updates.length) return;
-  // Run classifications in parallel, ignore individual failures
-  await Promise.all(
-    updates.map(u => classifyBelief(svc, userId, u).catch(() => {}))
-  );
-  // Detect and save supporting / contradicting links between user_views
-  await detectAndSaveLinks(svc, userId, updates).catch(() => {});
-}
-
-async function classifyBelief(
-  svc: ReturnType<typeof supabaseService>,
-  userId: string,
-  belief: BeliefUpdate,
+  userMessage: string,
+  assistantMessage: string,
+  topicTags: string[],
 ) {
   if (!_questions || !_categories) return;
-  if (!belief.topic_label || !belief.summary) return;
 
-  // Match category by name (case-insensitive)
-  const category = _categories.find(
-    c => c.name.toLowerCase() === belief.topic_label.toLowerCase()
+  // Match cached categories to the topic tags returned by the advisor
+  const relevantCats = _categories.filter(c =>
+    topicTags.some(tag =>
+      c.name.toLowerCase().includes(tag.toLowerCase()) ||
+      tag.toLowerCase().includes(c.name.toLowerCase())
+    )
   );
-  if (!category) return;
+  if (!relevantCats.length) return;
 
-  // Get L1 + L2 questions for this category (max 6)
-  const candidates = _questions
-    .filter(q => q.category_id === category.id)
-    .slice(0, 6);
+  const catIds = new Set(relevantCats.map(c => c.id));
+  const candidates = _questions.filter(q => catIds.has(q.category_id)).slice(0, 24);
   if (!candidates.length) return;
 
   const questionsList = candidates
     .map(q => `${q.id}: ${q.question_text}`)
     .join("\n");
 
-  // Classification call — 150 token cap, separate from conversation
+  // Single classification call for the whole turn
   const resp = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 150,
+    max_tokens: 800,
+    system: "You are a political position classifier. Given the user's message and the assistant's reply, identify which of the provided taxonomy questions the user's words imply an answer to. For each one, return: question_id, stance (yes/no/abstain), core_argument (one sentence — a quote or close paraphrase of what the user said), confidence (0.0 to 1.0). Return only a JSON array, no other text. If nothing can be inferred return an empty array [].",
     messages: [{
       role: "user",
-      content: `You are a political stance classifier. A user expressed this opinion: ${belief.summary}. Their exact words were: ${belief.raw_excerpt ?? belief.summary}. Here are political questions from our taxonomy relevant to the category ${belief.topic_label}:
-${questionsList}
-
-Which single question does this opinion most directly answer? Return JSON only:
-{"question_id":"<uuid from list>","stance":"yes","confidence":0.8,"core_argument":"<user argument in 15 words max>"}
-If none match well, return: {"question_id":null}`,
+      content: `User message: "${userMessage}"\n\nAssistant reply: "${assistantMessage}"\n\nTaxonomy questions:\n${questionsList}`,
     }],
   });
 
   const raw = resp.content.find(c => c.type === "text")?.text ?? "";
-  let result: {
-    question_id: string | null;
-    stance?: string;
-    confidence?: number;
-    core_argument?: string;
-  };
+  let results: Array<{
+    question_id: string;
+    stance: string;
+    core_argument: string;
+    confidence: number;
+  }>;
   try {
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
+    const start = raw.indexOf("[");
+    const end = raw.lastIndexOf("]");
     if (start < 0 || end <= start) return;
-    result = JSON.parse(raw.slice(start, end + 1));
+    results = JSON.parse(raw.slice(start, end + 1));
+    if (!Array.isArray(results)) return;
   } catch {
     return;
   }
 
-  if (!result.question_id) return;
-
-  // Validate the returned question_id is actually in our list
-  const question = candidates.find(q => q.id === result.question_id);
-  if (!question) return;
-
-  const stance = result.stance as "yes" | "no" | "abstain" | undefined;
-  if (!stance || !["yes", "no", "abstain"].includes(stance)) return;
-
-  // Take the higher of AI confidence and belief confidence_score
-  const confidence = Math.max(
-    Math.max(0, Math.min(1, result.confidence ?? 0)),
-    Math.max(0, Math.min(1, belief.confidence_score)),
-  );
-  const coreArgument = (result.core_argument ?? belief.summary).slice(0, 200);
   const now = new Date().toISOString();
 
-  // Upsert inferred_positions by (user_id, question_id)
-  const { data: existing } = await svc
-    .from("inferred_positions")
-    .select("id, confidence, arguments_json")
-    .eq("user_id", userId)
-    .eq("question_id", result.question_id)
-    .maybeSingle();
+  await Promise.allSettled(
+    results.map(async (result) => {
+      if (!result.question_id) return;
+      const question = candidates.find(q => q.id === result.question_id);
+      if (!question) return;
 
-  const newArg = { text: coreArgument, ts: now };
+      const stance = result.stance as "yes" | "no" | "abstain";
+      if (!["yes", "no", "abstain"].includes(stance)) return;
 
-  if (existing) {
-    const existingConf = Number(existing.confidence ?? 0);
-    const existingArgs: { text: string; ts: string }[] = Array.isArray(existing.arguments_json)
-      ? existing.arguments_json : [];
-    const isDuplicate = existingArgs.some(a => a.text === coreArgument);
-    const args = isDuplicate ? existingArgs : [...existingArgs, newArg].slice(-5);
+      const confidence = Math.max(0, Math.min(1, result.confidence ?? 0.5));
+      const coreArgument = (result.core_argument ?? "").slice(0, 200);
 
-    const update: Record<string, unknown> = { arguments_json: args, updated_at: now };
-    // Only promote stance/confidence if new classification is more confident
-    if (confidence > existingConf) {
-      update.stance = stance;
-      update.confidence = confidence;
-    }
-    await svc.from("inferred_positions").update(update).eq("id", existing.id);
-  } else {
-    await svc.from("inferred_positions").insert({
-      user_id: userId,
-      session_id: "advisor_extraction",
-      question_id: result.question_id,
-      category_id: category.id,
-      subtopic_id: question.subtopic_id ?? null,
-      stance,
-      confidence,
-      reasoning: belief.summary,
-      arguments_json: [newArg],
-    });
-  }
+      const { data: existing } = await svc
+        .from("inferred_positions")
+        .select("id, confidence")
+        .eq("user_id", userId)
+        .eq("question_id", result.question_id)
+        .maybeSingle();
 
-  // Update collective_scores for this question
-  await updateCollectiveScores(svc, result.question_id, category.id);
-
-  // Sync public_nodes tension stats
-  await syncPublicNode(svc, category.id, category.name).catch(() => {});
+      if (existing) {
+        // Only update if new classification is more confident
+        if (confidence > Number(existing.confidence ?? 0)) {
+          await svc.from("inferred_positions").update({
+            stance,
+            confidence,
+            core_argument: coreArgument,
+            updated_at: now,
+          }).eq("id", existing.id);
+        }
+      } else {
+        await svc.from("inferred_positions").insert({
+          user_id: userId,
+          session_id: "advisor_extraction",
+          question_id: result.question_id,
+          category_id: question.category_id,
+          subtopic_id: question.subtopic_id ?? null,
+          stance,
+          confidence,
+          core_argument: coreArgument,
+          arguments_json: [],
+        });
+      }
+    })
+  );
 }
 
 // -----------------------------------------------------------------------
@@ -621,72 +592,3 @@ async function detectAndSaveLinks(
   );
 }
 
-// -----------------------------------------------------------------------
-// Aggregate collective_scores for a specific question
-// -----------------------------------------------------------------------
-
-async function updateCollectiveScores(
-  svc: ReturnType<typeof supabaseService>,
-  questionId: string,
-  categoryId: string,
-) {
-  const { data: positions } = await svc
-    .from("inferred_positions")
-    .select("stance, confidence, arguments_json")
-    .eq("question_id", questionId)
-    .not("stance", "is", null);
-
-  if (!positions || !positions.length) return;
-
-  const yes = positions.filter(p => p.stance === "yes");
-  const no = positions.filter(p => p.stance === "no");
-  const abstain = positions.filter(p => p.stance === "abstain");
-
-  const totalWeight = positions.reduce((s, p) => s + Number(p.confidence ?? 0.5), 0);
-  const yesWeight = yes.reduce((s, p) => s + Number(p.confidence ?? 0.5), 0);
-  const noWeight = no.reduce((s, p) => s + Number(p.confidence ?? 0.5), 0);
-
-  const yes_weighted_pct = totalWeight > 0 ? Math.round((yesWeight / totalWeight) * 100) : 50;
-  const no_weighted_pct = totalWeight > 0 ? Math.round((noWeight / totalWeight) * 100) : 50;
-
-  const diff = Math.abs(yes_weighted_pct - no_weighted_pct);
-  const tension_flag = diff < 10 ? "hot" : diff < 25 ? "disputed" : diff < 50 ? "contested" : "agreed";
-
-  // Top 3 yes/no arguments from highest-confidence positions
-  function topArgs(group: typeof yes) {
-    return group
-      .sort((a, b) => Number(b.confidence ?? 0) - Number(a.confidence ?? 0))
-      .slice(0, 3)
-      .map(p => {
-        const args: { text: string }[] = Array.isArray(p.arguments_json) ? p.arguments_json : [];
-        return args[args.length - 1]?.text ?? "";
-      })
-      .filter(Boolean);
-  }
-
-  const scoreData = {
-    question_id: questionId,
-    category_id: categoryId,
-    total_responses: positions.length,
-    yes_weighted_pct,
-    no_weighted_pct,
-    abstain_count: abstain.length,
-    tension_flag,
-    top_yes_args: topArgs(yes),
-    top_no_args: topArgs(no),
-    computed_at: new Date().toISOString(),
-  };
-
-  // Select-first upsert (partial index not supported by PostgREST upsert)
-  const { data: existingScore } = await svc
-    .from("collective_scores")
-    .select("id")
-    .eq("question_id", questionId)
-    .maybeSingle();
-
-  if (existingScore) {
-    await svc.from("collective_scores").update(scoreData).eq("id", existingScore.id);
-  } else {
-    await svc.from("collective_scores").insert(scoreData);
-  }
-}

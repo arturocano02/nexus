@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/browser";
 import { useUser } from "@/lib/useUser";
-import type { CategoryAggregate, MapNodeDatum, SubtopicAggregate } from "@/lib/types";
+import type { CategoryAggregate, MapNodeDatum, QuestionAggregate } from "@/lib/types";
 
 const NodeMap = dynamic(() => import("@/components/NodeMap"), { ssr: false });
 
@@ -32,7 +32,8 @@ export default function ArenaPage() {
   const [categories, setCategories] = useState<CategoryAggregate[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<CategoryAggregate | null>(null);
-  const [mySubtopicIds, setMySubtopicIds] = useState<Set<string>>(new Set());
+  // category_ids where the user has deployed positions
+  const [myCategoryIds, setMyCategoryIds] = useState<Set<string>>(new Set());
 
   // Post-submission state
   const [banner, setBanner] = useState<{ count: number } | null>(null);
@@ -46,9 +47,7 @@ export default function ArenaPage() {
     if (params.get("submitted") === "true") {
       const count = parseInt(params.get("count") ?? "0", 10);
       setBanner({ count });
-      // Clean URL without reloading
       window.history.replaceState({}, "", window.location.pathname);
-      // Auto-hide banner after 5s
       setTimeout(() => setBanner(null), 5000);
     }
   }, []);
@@ -73,36 +72,30 @@ export default function ArenaPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Load user's own deployed positions to highlight their nodes
+  // Load the user's deployed category_ids for blob highlighting
   useEffect(() => {
     if (!user) return;
     async function loadMine() {
       const { data } = await supa
         .from("inferred_positions")
-        .select("subtopic_id, category_id")
+        .select("category_id")
         .eq("user_id", user!.id)
-        .not("deployed_at", "is", null);
+        .not("deployed_at", "is", null)
+        .not("category_id", "is", null);
       if (data) {
-        setMySubtopicIds(new Set(data.map((p: any) => p.subtopic_id).filter(Boolean)));
+        setMyCategoryIds(new Set(data.map((p: any) => p.category_id).filter(Boolean)));
       }
     }
     loadMine();
   }, [user]);
 
-  // When we arrive fresh from a submission AND categories have loaded,
-  // pulse the user's blobs to show their contribution landing.
+  // Pulse the user's category blobs on fresh arrival from submission
   useEffect(() => {
-    if (!banner || categories.length === 0 || mySubtopicIds.size === 0) return;
-    const myCatIds = new Set(
-      categories
-        .filter((cat) => cat.subtopics.some((s) => mySubtopicIds.has(s.subtopic_id)))
-        .map((cat) => cat.category_id),
-    );
-    if (myCatIds.size === 0) return;
-    setPulsingIds(myCatIds);
+    if (!banner || categories.length === 0 || myCategoryIds.size === 0) return;
+    setPulsingIds(new Set(myCategoryIds));
     const t = setTimeout(() => setPulsingIds(new Set()), 5000);
     return () => clearTimeout(t);
-  }, [banner, categories, mySubtopicIds]);
+  }, [banner, categories, myCategoryIds]);
 
   // Build globe nodes from categories
   const nodes: MapNodeDatum[] = categories.map((cat) => ({
@@ -116,14 +109,8 @@ export default function ArenaPage() {
     hexColor: tensionColor(cat.tension_flag, cat.yes_weighted_pct),
   }));
 
-  // Highlight ids = categories where user has deployed positions
-  const highlightIds = new Set(
-    categories
-      .filter((cat) =>
-        cat.subtopics.some((s) => mySubtopicIds.has(s.subtopic_id))
-      )
-      .map((cat) => cat.category_id)
-  );
+  // Highlight category blobs where the user has deployed
+  const highlightIds = myCategoryIds;
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -233,7 +220,6 @@ export default function ArenaPage() {
         {selected && (
           <CategoryOverlay
             category={selected}
-            userSubtopicIds={mySubtopicIds}
             onClose={() => setSelected(null)}
           />
         )}
@@ -259,44 +245,19 @@ export default function ArenaPage() {
 }
 
 // -----------------------------------------------------------------------
-// Combined views overlay — redesigned per spec
+// Category overlay — shows per-question split bars + expandable top args
 // -----------------------------------------------------------------------
 function CategoryOverlay({
   category,
-  userSubtopicIds,
   onClose,
 }: {
   category: CategoryAggregate;
-  userSubtopicIds: Set<string>;
   onClose: () => void;
 }) {
   const router = useRouter();
-  const supa = supabaseBrowser();
-
-  // Fetch subtopic questions (latent_question_text) for the question section
-  const [questions, setQuestions] = useState<{ subtopic_id: string; question: string }[]>([]);
-
-  useEffect(() => {
-    (async () => {
-      const subIds = category.subtopics.map(s => s.subtopic_id);
-      if (!subIds.length) return;
-      const { data } = await supa
-        .from("taxonomy_subtopics")
-        .select("id, latent_question_text, name")
-        .in("id", subIds);
-      if (data) {
-        setQuestions(
-          data.map((s: any) => ({
-            subtopic_id: s.id,
-            question: s.latent_question_text || s.name,
-          }))
-        );
-      }
-    })();
-  }, [category.category_id]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   function handleAddArgument() {
-    // Store context so your-view/advisor can pick it up
     sessionStorage.setItem("nexus_arena_context", JSON.stringify({
       topic: category.category_name,
       for_args: category.top_yes_args,
@@ -306,8 +267,13 @@ function CategoryOverlay({
     router.push("/your-view");
   }
 
-  const yesPct = category.yes_weighted_pct;
-  const noPct = category.no_weighted_pct;
+  // Questions with any data, sorted by response count desc
+  const activeQuestions = (category.questions ?? [])
+    .filter(q => q.yes_count + q.no_count + q.abstain_count > 0)
+    .sort((a, b) => (b.yes_count + b.no_count + b.abstain_count) - (a.yes_count + a.no_count + a.abstain_count));
+
+  const yesPct    = category.yes_weighted_pct;
+  const noPct     = category.no_weighted_pct;
   const agentCount = category.total_responses;
 
   return (
@@ -325,12 +291,12 @@ function CategoryOverlay({
         exit={{ y: "100%" }}
         transition={{ type: "spring", stiffness: 300, damping: 30 }}
         className="fixed inset-x-0 bottom-0 z-[190] mx-auto max-w-2xl w-full"
-        style={{ maxHeight: "80dvh" }}
+        style={{ maxHeight: "85dvh" }}
       >
         <div
           className="flex flex-col text-secondary overflow-hidden"
           style={{
-            maxHeight: "80dvh",
+            maxHeight: "85dvh",
             background: "rgba(4,2,24,0.97)",
             backdropFilter: "blur(24px)",
             borderTop: "1px solid rgba(255,255,255,0.07)",
@@ -338,13 +304,13 @@ function CategoryOverlay({
           }}
         >
           {/* Header */}
-          <div className="shrink-0 px-6 pt-6 pb-4 flex items-start justify-between">
+          <div className="shrink-0 px-6 pt-6 pb-3 flex items-start justify-between">
             <div>
               <h2 className="font-display text-xl font-bold tracking-tight">
                 {category.category_name}
               </h2>
               <p className="text-[11px] mt-1" style={{ color: "rgba(245,245,245,0.35)" }}>
-                {agentCount} agent{agentCount !== 1 ? "s" : ""} contributed to this topic
+                {agentCount} agent{agentCount !== 1 ? "s" : ""} · overall lean
               </p>
             </div>
             <button
@@ -358,120 +324,129 @@ function CategoryOverlay({
             </button>
           </div>
 
-          {/* Split bar */}
+          {/* Category-level split bar */}
           <div className="shrink-0 px-6 pb-4">
-            <div className="flex rounded-xl overflow-hidden h-10 text-sm font-bold">
+            <div className="flex rounded-xl overflow-hidden h-9">
               <div
                 className="flex items-center justify-center transition-all"
                 style={{
                   flex: yesPct,
-                  background: "rgba(255,191,0,0.25)",
+                  background: "rgba(255,191,0,0.22)",
                   borderRight: "1px solid rgba(0,0,0,0.3)",
                   color: "#FFBF00",
-                  fontSize: 13,
+                  fontSize: 12,
+                  fontWeight: 700,
                   minWidth: yesPct > 10 ? undefined : 0,
                 }}
               >
-                {yesPct > 12 && `${yesPct}%`}
+                {yesPct > 12 && `${yesPct}% for`}
               </div>
               <div
                 className="flex items-center justify-center transition-all"
                 style={{
                   flex: noPct,
-                  background: "rgba(255,90,106,0.25)",
+                  background: "rgba(255,90,106,0.22)",
                   color: "#FF5A6A",
-                  fontSize: 13,
+                  fontSize: 12,
+                  fontWeight: 700,
                   minWidth: noPct > 10 ? undefined : 0,
                 }}
               >
-                {noPct > 12 && `${noPct}%`}
+                {noPct > 12 && `${noPct}% against`}
               </div>
-            </div>
-            <div className="flex justify-between mt-1">
-              <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: "rgba(255,191,0,0.5)" }}>For</span>
-              <span className="text-[9px] uppercase tracking-widest font-bold" style={{ color: "rgba(255,90,106,0.5)" }}>Against</span>
             </div>
           </div>
 
-          {/* Questions */}
-          {questions.length > 0 && (
-            <div className="shrink-0 px-6 pb-4 space-y-1.5">
-              {questions.slice(0, 3).map(q => (
-                <p key={q.subtopic_id} className="text-sm italic" style={{ color: "rgba(255,191,0,0.75)" }}>
-                  "{q.question}"
-                </p>
-              ))}
-            </div>
-          )}
-
-          {/* For / Against columns */}
-          <div className="flex-1 overflow-y-auto px-6 pb-4 scrollbar-hide">
-            <div className="grid grid-cols-2 gap-3">
-              {/* FOR column */}
-              <div>
-                <p className="text-[9px] uppercase tracking-[0.25em] font-bold mb-2"
-                  style={{ color: "rgba(255,191,0,0.5)" }}>For</p>
-                <div className="space-y-2">
-                  {category.top_yes_args.slice(0, 5).map((arg, i) => (
-                    <div
-                      key={i}
-                      className="rounded-xl px-3 py-2.5"
-                      style={{ background: "rgba(255,191,0,0.06)", border: "1px solid rgba(255,191,0,0.1)" }}
-                    >
-                      <p className="text-xs leading-relaxed" style={{ color: "rgba(245,245,245,0.72)" }}>
-                        {arg}
-                      </p>
-                      <span
-                        className="text-[9px] mt-1.5 inline-flex items-center gap-1"
-                        style={{ color: "rgba(255,191,0,0.4)" }}
-                      >
-                        #{i + 1} most common
-                      </span>
-                    </div>
-                  ))}
-                  {category.top_yes_args.length === 0 && (
-                    <p className="text-xs" style={{ color: "rgba(245,245,245,0.2)" }}>No arguments yet</p>
-                  )}
-                </div>
-              </div>
-
-              {/* AGAINST column */}
-              <div>
-                <p className="text-[9px] uppercase tracking-[0.25em] font-bold mb-2"
-                  style={{ color: "rgba(255,90,106,0.5)" }}>Against</p>
-                <div className="space-y-2">
-                  {category.top_no_args.slice(0, 5).map((arg, i) => (
-                    <div
-                      key={i}
-                      className="rounded-xl px-3 py-2.5"
-                      style={{ background: "rgba(255,90,106,0.06)", border: "1px solid rgba(255,90,106,0.1)" }}
-                    >
-                      <p className="text-xs leading-relaxed" style={{ color: "rgba(245,245,245,0.72)" }}>
-                        {arg}
-                      </p>
-                      <span
-                        className="text-[9px] mt-1.5 inline-flex items-center gap-1"
-                        style={{ color: "rgba(255,90,106,0.4)" }}
-                      >
-                        #{i + 1} most common
-                      </span>
-                    </div>
-                  ))}
-                  {category.top_no_args.length === 0 && (
-                    <p className="text-xs" style={{ color: "rgba(245,245,245,0.2)" }}>No arguments yet</p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {agentCount === 0 && (
+          {/* Per-question list */}
+          <div className="flex-1 overflow-y-auto px-6 pb-4 scrollbar-hide space-y-3">
+            {activeQuestions.length === 0 && (
               <p className="text-center text-sm py-8" style={{ color: "rgba(245,245,245,0.25)" }}>
-                No contributions yet for this topic.
+                No contributions yet. Be the first to add your view.
               </p>
             )}
+
+            {activeQuestions.map(q => {
+              const total = q.yes_count + q.no_count + q.abstain_count;
+              const isExpanded = expandedId === q.question_id;
+              return (
+                <div
+                  key={q.question_id}
+                  style={{
+                    borderRadius: 14,
+                    border: "1px solid rgba(255,255,255,0.07)",
+                    background: "rgba(255,255,255,0.03)",
+                    overflow: "hidden",
+                  }}
+                >
+                  {/* Question row */}
+                  <button
+                    onClick={() => setExpandedId(isExpanded ? null : q.question_id)}
+                    style={{
+                      width: "100%", textAlign: "left", background: "none", border: "none",
+                      cursor: "pointer", padding: "12px 14px",
+                    }}
+                  >
+                    <p style={{ fontSize: 13, color: "rgba(245,245,245,0.85)", lineHeight: 1.45, marginBottom: 8 }}>
+                      {q.question_text}
+                    </p>
+
+                    {/* Mini split bar */}
+                    <div style={{ display: "flex", borderRadius: 6, overflow: "hidden", height: 6, marginBottom: 4 }}>
+                      <div style={{ flex: q.yes_weighted_pct, background: "rgba(255,191,0,0.5)" }} />
+                      <div style={{ flex: q.no_weighted_pct, background: "rgba(255,90,106,0.5)" }} />
+                      <div style={{ flex: Math.max(0, 100 - q.yes_weighted_pct - q.no_weighted_pct), background: "rgba(136,135,128,0.3)" }} />
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <span style={{ fontSize: 10, color: "#FFBF00", fontWeight: 600 }}>{q.yes_weighted_pct}% for</span>
+                      <span style={{ fontSize: 10, color: "#FF5A6A", fontWeight: 600 }}>{q.no_weighted_pct}% against</span>
+                      <span style={{ fontSize: 10, color: "rgba(245,245,245,0.3)", marginLeft: "auto" }}>
+                        {total} agent{total !== 1 ? "s" : ""}
+                        {" · "}
+                        <span style={{ color: "rgba(255,191,0,0.5)" }}>{isExpanded ? "▲" : "▼"}</span>
+                      </span>
+                    </div>
+                  </button>
+
+                  {/* Expanded: top args side-by-side */}
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        style={{ overflow: "hidden" }}
+                      >
+                        <div style={{
+                          display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8,
+                          padding: "0 14px 14px", borderTop: "1px solid rgba(255,255,255,0.05)",
+                          paddingTop: 10,
+                        }}>
+                          <ArgColumn
+                            label="For"
+                            args={q.top_yes_args}
+                            color="#FFBF00"
+                            bg="rgba(255,191,0,0.06)"
+                            border="rgba(255,191,0,0.12)"
+                          />
+                          <ArgColumn
+                            label="Against"
+                            args={q.top_no_args}
+                            color="#FF5A6A"
+                            bg="rgba(255,90,106,0.06)"
+                            border="rgba(255,90,106,0.12)"
+                          />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
           </div>
 
-          {/* Add your argument CTA */}
+          {/* CTA */}
           <div className="shrink-0 px-6 pb-8 pt-3 border-t border-white/5">
             <button
               onClick={handleAddArgument}
@@ -483,5 +458,39 @@ function CategoryOverlay({
         </div>
       </motion.div>
     </>
+  );
+}
+
+function ArgColumn({
+  label, args, color, bg, border,
+}: {
+  label: string;
+  args: string[];
+  color: string;
+  bg: string;
+  border: string;
+}) {
+  return (
+    <div>
+      <p className="text-[9px] uppercase tracking-[0.25em] font-bold mb-2" style={{ color: color + "80" }}>
+        {label}
+      </p>
+      <div className="space-y-1.5">
+        {args.slice(0, 3).map((arg, i) => (
+          <div
+            key={i}
+            className="rounded-lg px-2.5 py-2"
+            style={{ background: bg, border: `1px solid ${border}` }}
+          >
+            <p className="text-[11px] leading-relaxed" style={{ color: "rgba(245,245,245,0.72)" }}>
+              {arg}
+            </p>
+          </div>
+        ))}
+        {args.length === 0 && (
+          <p className="text-[11px]" style={{ color: "rgba(245,245,245,0.2)" }}>No arguments yet</p>
+        )}
+      </div>
+    </div>
   );
 }
