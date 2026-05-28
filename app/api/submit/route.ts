@@ -318,6 +318,25 @@ export async function POST(req: NextRequest) {
   const subtopicIds = [...new Set(positions.map((p: any) => p.subtopic_id).filter(Boolean))];
   await recomputeCollectiveScores(svc, subtopicIds);
 
+  // Mark the matching user_views as submitted_to_arena so the globe reflects it
+  if (subtopicIds.length > 0) {
+    try {
+      const { data: subs } = await svc
+        .from("taxonomy_subtopics")
+        .select("id, name")
+        .in("id", subtopicIds);
+      if (subs && subs.length > 0) {
+        const subtopicNames = subs.map((s: any) => s.name);
+        await svc
+          .from("user_views")
+          .update({ submitted_to_arena: true })
+          .eq("user_id", user.id)
+          .in("topic_label", subtopicNames)
+          .eq("is_deleted", false);
+      }
+    } catch { /* non-critical */ }
+  }
+
   return NextResponse.json({ deployed, session_id });
 }
 
