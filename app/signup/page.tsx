@@ -143,20 +143,25 @@ export default function SignupPage() {
 
     const userId = authData.user.id;
 
-    // Insert profile row
-    const { error: profileErr } = await supa.from("profiles").insert({
-      id: userId,
-      username: uRaw,
-      display_name: displayName.trim(),
-      advisor_name: advisorName.trim(),
-      age: parseInt(age, 10),
+    // Insert profile row via server route (bypasses RLS for new users)
+    const profileRes = await fetch("/api/auth/create-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
+        username: uRaw,
+        display_name: displayName.trim(),
+        advisor_name: advisorName.trim(),
+        age: parseInt(age, 10),
+      }),
     });
 
-    if (profileErr) {
-      if (profileErr.message.includes("unique")) {
+    if (!profileRes.ok) {
+      const body = await profileRes.json().catch(() => ({}));
+      if (body.error?.includes("unique") || body.error?.includes("duplicate")) {
         setErrors({ username: "Username just got taken — choose another" });
       } else {
-        setErrors({ form: profileErr.message });
+        setErrors({ form: body.error ?? "Failed to create profile" });
       }
       setLoading(false);
       return;
