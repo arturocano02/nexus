@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 // Routes that don't require authentication
-const PUBLIC_PATHS = ["/login", "/signup", "/signup/complete"];
+const PUBLIC_PATHS = ["/login", "/signup", "/signup/complete", "/auth"];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
