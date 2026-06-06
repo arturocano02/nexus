@@ -365,111 +365,132 @@ interface DonutChartProps {
 
 function DonutChart({ items, total, title }: DonutChartProps) {
   const [hovered, setHovered] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
 
-  const CX = 120;
-  const CY = 120;
-  const INNER_R = 58;
-  const OUTER_R = 88;
-  const OUTER_R_HOVER = 96;
+  const CX = 110;
+  const CY = 110;
+  const INNER_R = 54;
+  const OUTER_R = 82;
+  const OUTER_R_HOVER = 90;
 
-  // Build cumulative angles
   const slices = items.map((item, i) => {
     const start = items.slice(0, i).reduce((acc, it) => acc + it.proportion, 0) * 360;
     const end = start + item.proportion * 360;
     return { ...item, start, end, index: i };
   });
 
-  const hoveredItem = hovered !== null ? items[hovered] : null;
+  const activeIndex = hovered ?? expanded ?? null;
+  const activeItem = activeIndex !== null ? items[activeIndex] : null;
+  const centerLabel = activeItem
+    ? (activeItem.category.length > 14 ? activeItem.category.slice(0, 13) + "…" : activeItem.category)
+    : "Total paid";
+  const centerAmount = activeItem ? fmt(activeItem.userAmount) : fmt(total);
 
-  const centerLabel1 = hoveredItem ? hoveredItem.category : "Total paid";
-  const centerAmount = hoveredItem ? fmt(hoveredItem.userAmount) : fmt(total);
+  const sorted = [...items].sort((a, b) => b.proportion - a.proportion);
 
   return (
-    <div className="flex flex-col items-center w-full">
-      <p className="text-[10px] tracking-[0.25em] uppercase font-bold text-white/40 mb-3">{title}</p>
+    <div className="flex flex-col w-full gap-4">
+      <p className="text-[10px] tracking-[0.25em] uppercase font-bold text-white/40">{title}</p>
 
-      {/* Chart + legend wrapper */}
-      <div className="flex flex-col md:flex-row items-center md:items-start gap-6 w-full">
-        {/* SVG */}
-        <div className="flex-shrink-0 mx-auto md:mx-0">
-          <svg
-            width="240"
-            height="240"
-            viewBox="0 0 240 240"
-            style={{ maxWidth: "280px", width: "100%" }}
-          >
-            {/* Slices */}
+      {/* On desktop: chart left + legend right. On mobile: chart top, legend below */}
+      <div className="flex flex-col sm:flex-row sm:items-start gap-5 w-full">
+
+        {/* SVG donut */}
+        <div className="flex-shrink-0 flex justify-center sm:justify-start">
+          <svg width="220" height="220" viewBox="0 0 220 220">
             {slices.map((s) => {
-              const isHovered = hovered === s.index;
-              const outerR = isHovered ? OUTER_R_HOVER : OUTER_R;
+              const isActive = hovered === s.index || (hovered === null && expanded === s.index);
+              const outerR = isActive ? OUTER_R_HOVER : OUTER_R;
               return (
                 <path
                   key={s.index}
                   d={arcPath(CX, CY, INNER_R, outerR, s.start, s.end)}
                   fill={s.color}
-                  opacity={hovered !== null && !isHovered ? 0.55 : 1}
-                  style={{ transition: "opacity 150ms, d 150ms" }}
+                  opacity={activeIndex !== null && !isActive ? 0.45 : 1}
+                  style={{ transition: "opacity 150ms" }}
                   onMouseEnter={() => setHovered(s.index)}
                   onMouseLeave={() => setHovered(null)}
-                  onTouchStart={() => setHovered(s.index)}
-                  onTouchEnd={() => setHovered(null)}
+                  onClick={() => setExpanded(prev => prev === s.index ? null : s.index)}
                   cursor="pointer"
                 />
               );
             })}
-
-            {/* Centre label */}
-            <text
-              x={CX}
-              y={CY - 10}
-              textAnchor="middle"
-              fill="rgba(245,245,245,0.45)"
-              fontSize="10"
-              fontFamily="var(--font-manrope)"
-            >
-              {centerLabel1.length > 16 ? centerLabel1.slice(0, 16) + "…" : centerLabel1}
+            <text x={CX} y={CY - 8} textAnchor="middle" fill="rgba(245,245,245,0.4)" fontSize="9.5" fontFamily="var(--font-manrope)">
+              {centerLabel}
             </text>
-            <text
-              x={CX}
-              y={CY + 12}
-              textAnchor="middle"
-              fill="#FFBF00"
-              fontSize="20"
-              fontWeight="700"
-              fontFamily="var(--font-jakarta)"
-            >
+            <text x={CX} y={CY + 13} textAnchor="middle" fill="#FFBF00" fontSize="19" fontWeight="700" fontFamily="var(--font-jakarta)">
               {centerAmount}
             </text>
           </svg>
         </div>
 
         {/* Legend */}
-        <div className="flex flex-col gap-1.5 w-full md:max-w-[280px] overflow-y-auto max-h-60 md:max-h-none pr-1">
-          {[...items]
-            .sort((a, b) => b.proportion - a.proportion)
-            .map((item) => {
-              const origIndex = items.indexOf(item);
-              const isH = hovered === origIndex;
-              return (
+        <div className="flex flex-col gap-0.5 w-full min-w-0">
+          {sorted.map((item) => {
+            const origIndex = items.indexOf(item);
+            const isH = hovered === origIndex;
+            const isE = expanded === origIndex;
+            return (
+              <div key={item.category}>
+                {/* Row */}
                 <div
-                  key={item.category}
-                  className="flex items-center gap-2 cursor-pointer rounded-lg px-2 py-1.5 transition-colors"
-                  style={{ background: isH ? "rgba(255,255,255,0.05)" : "transparent" }}
+                  className="flex items-center gap-2.5 cursor-pointer rounded-xl px-3 py-2 transition-colors select-none"
+                  style={{ background: isH || isE ? "rgba(255,255,255,0.06)" : "transparent" }}
                   onMouseEnter={() => setHovered(origIndex)}
                   onMouseLeave={() => setHovered(null)}
+                  onClick={() => setExpanded(prev => prev === origIndex ? null : origIndex)}
                 >
-                  <span
-                    className="flex-shrink-0 w-2.5 h-2.5 rounded-full"
-                    style={{ background: item.color }}
-                  />
-                  <span className="text-[11px] text-white/70 flex-1 leading-tight">
+                  <span className="flex-shrink-0 w-2.5 h-2.5 rounded-full" style={{ background: item.color }} />
+                  <span className="flex-1 text-[13px] text-white/75 leading-tight min-w-0 truncate">
                     {item.emoji} {item.category}
                   </span>
-                  <span className="text-[10px] text-white/40 tabular-nums">{(item.proportion * 100).toFixed(1)}%</span>
-                  <span className="text-[11px] font-semibold text-amber-400 tabular-nums ml-1">{fmt(item.userAmount)}</span>
+                  <span className="text-[11px] text-white/35 tabular-nums flex-shrink-0">{(item.proportion * 100).toFixed(1)}%</span>
+                  <span className="text-[13px] font-semibold text-amber-400 tabular-nums flex-shrink-0 w-14 text-right">{fmt(item.userAmount)}</span>
+                  <span className="text-white/25 text-[10px] flex-shrink-0">{isE ? "▲" : "▼"}</span>
                 </div>
-              );
-            })}
+
+                {/* Expandable detail panel */}
+                <AnimatePresence>
+                  {isE && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.22, ease: "easeInOut" }}
+                      className="overflow-hidden"
+                    >
+                      <div
+                        className="mx-2 mb-1 rounded-xl px-4 py-3 space-y-3"
+                        style={{
+                          background: "rgba(255,255,255,0.03)",
+                          border: "1px solid rgba(255,255,255,0.06)",
+                        }}
+                      >
+                        {/* Description */}
+                        <p className="text-[12px] text-white/55 leading-relaxed">{item.description}</p>
+
+                        {/* Per-period breakdown */}
+                        <div className="flex gap-4">
+                          <div>
+                            <p className="text-[9px] tracking-[0.2em] uppercase text-white/30 mb-0.5">Per year</p>
+                            <p className="text-sm font-bold text-amber-400">{fmt(item.userAmount)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] tracking-[0.2em] uppercase text-white/30 mb-0.5">Per month</p>
+                            <p className="text-sm font-bold text-white/60">{fmt(item.userAmount / 12)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] tracking-[0.2em] uppercase text-white/30 mb-0.5">Per week</p>
+                            <p className="text-sm font-bold text-white/60">{fmt(item.userAmount / 52)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -769,7 +790,7 @@ export default function TaxBreakdownPage() {
               {/* Section B — Donut charts */}
               <div className="space-y-3">
                 <p className="text-[9px] tracking-[0.3em] uppercase font-bold text-white/40">Your tax split</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="flex flex-col gap-6">
                   <div className="card p-6">
                     <DonutChart
                       items={result.centralItems}
