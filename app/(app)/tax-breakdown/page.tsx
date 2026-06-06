@@ -19,11 +19,16 @@ interface CouncilResult {
   authorityName: string;
 }
 
+interface DetailLine {
+  text: string;
+  sub?: number; // fraction of this category's total going to this line
+}
+
 interface SpendingItem {
   category: string;
   emoji: string;
   description: string;
-  details: string[];
+  details: DetailLine[];
   proportion: number;
   color: string;
   userAmount: number;
@@ -79,143 +84,143 @@ const CENTRAL_SPENDING_BASE = [
     category: "Social Protection", emoji: "🛡️", proportion: 0.274, color: "#4F86C6",
     description: "The largest single item in government spending — a safety net covering retirement, disability, unemployment and housing for millions.",
     details: [
-      "State Pension ~£124bn — paid to 12.7 million pensioners, currently £221.20/week (full new state pension)",
-      "Universal Credit & legacy benefits ~£65bn — income support for people in or out of work",
-      "Personal Independence Payment (PIP) & disability ~£28bn — supports 3.4m people with long-term conditions",
-      "Housing Benefit ~£23bn — rent support for low-income tenants, increasingly replaced by UC housing element",
-      "Child Benefit & Working Tax Credit ~£19bn — paid to families with children regardless of income (tapered above £60k)",
-      "Carer's Allowance ~£4bn — £81.90/week for people providing 35+ hours of unpaid care",
-      "Bereavement benefits, maternity pay & statutory sick pay make up the remainder",
+      { text: "State Pension ~£124bn — paid to 12.7 million pensioners, currently £221.20/week (full new state pension)", sub: 0.380 },
+      { text: "Universal Credit & legacy benefits ~£65bn — income support for people in or out of work", sub: 0.199 },
+      { text: "Personal Independence Payment (PIP) & disability ~£28bn — supports 3.4m people with long-term conditions", sub: 0.086 },
+      { text: "Housing Benefit ~£23bn — rent support for low-income tenants, increasingly replaced by UC housing element", sub: 0.071 },
+      { text: "Child Benefit & Working Tax Credit ~£19bn — paid to families with children regardless of income (tapered above £60k)", sub: 0.058 },
+      { text: "Carer's Allowance ~£4bn — £81.90/week for people providing 35+ hours of unpaid care", sub: 0.012 },
+      { text: "Bereavement benefits, maternity pay & statutory sick pay make up the remainder", sub: 0.194 },
     ],
   },
   {
     category: "Health (NHS)", emoji: "🏥", proportion: 0.208, color: "#E05C5C",
     description: "Funds the entire National Health Service — free at point of use for all UK residents, one of the world's largest publicly funded health systems.",
     details: [
-      "NHS England core budget ~£168bn — hospitals, A&E, elective surgery, specialist services",
-      "GP & primary care ~£16bn — 340 million GP appointments per year",
-      "Mental health services ~£16bn — talking therapies, inpatient wards, crisis teams (still underfunded vs need)",
-      "NHS Scotland, Wales & Northern Ireland health budgets ~£20bn combined",
-      "Medicines & prescriptions ~£10bn — England charges £9.90 per item; Scotland/Wales are free",
-      "Public health & vaccinations ~£4bn — NHS flu jabs, childhood immunisations, cancer screening programmes",
-      "Health research (NIHR) ~£1.5bn — funds clinical trials and medical research in NHS settings",
+      { text: "NHS England core budget ~£168bn — hospitals, A&E, elective surgery, specialist services", sub: 0.680 },
+      { text: "GP & primary care ~£16bn — 340 million GP appointments per year", sub: 0.065 },
+      { text: "Mental health services ~£16bn — talking therapies, inpatient wards, crisis teams (still underfunded vs need)", sub: 0.065 },
+      { text: "NHS Scotland, Wales & Northern Ireland health budgets ~£20bn combined", sub: 0.081 },
+      { text: "Medicines & prescriptions ~£10bn — England charges £9.90 per item; Scotland/Wales are free", sub: 0.040 },
+      { text: "Public health & vaccinations ~£4bn — NHS flu jabs, childhood immunisations, cancer screening", sub: 0.016 },
+      { text: "Health research (NIHR) ~£1.5bn — funds clinical trials and medical research in NHS settings", sub: 0.006 },
     ],
   },
   {
     category: "Education", emoji: "🎓", proportion: 0.098, color: "#6DBF67",
     description: "Covers schools from nursery to sixth form, universities, apprenticeships and adult skills — investing in the UK's workforce of the future.",
     details: [
-      "School funding (ages 5–16) ~£58bn — National Funding Formula distributes money to ~24,000 schools",
-      "Special Educational Needs & Disabilities (SEND) ~£10bn — one of the fastest-growing pressures on the system",
-      "Higher Education & student loans ~£10bn — government writes off ~50% of student loans on average",
-      "Further Education & skills ~£9bn — colleges, T-Levels, apprenticeship levy (paid by large employers)",
-      "Early years & childcare ~£6bn — 15–30 free hours/week for 3–4 year olds; expanding to under-2s",
-      "School breakfast clubs, pupil premium (£1,480 per disadvantaged pupil) and free school meals",
-      "Research councils & Innovate UK ~£4bn — funds university research from physics to social sciences",
+      { text: "School funding (ages 5–16) ~£58bn — National Funding Formula distributes money to ~24,000 schools", sub: 0.498 },
+      { text: "Special Educational Needs & Disabilities (SEND) ~£10bn — one of the fastest-growing pressures on the system", sub: 0.086 },
+      { text: "Higher Education & student loans ~£10bn — government writes off ~50% of student loans on average", sub: 0.086 },
+      { text: "Further Education & skills ~£9bn — colleges, T-Levels, apprenticeship levy (paid by large employers)", sub: 0.077 },
+      { text: "Early years & childcare ~£6bn — 15–30 free hours/week for 3–4 year olds; expanding to under-2s", sub: 0.051 },
+      { text: "School breakfast clubs, pupil premium (£1,480 per disadvantaged pupil) and free school meals", sub: 0.117 },
+      { text: "Research councils & Innovate UK ~£4bn — funds university research from physics to social sciences", sub: 0.034 },
     ],
   },
   {
     category: "Debt Interest", emoji: "📉", proportion: 0.089, color: "#F0A500",
     description: "Interest on the UK's £2.6 trillion national debt — money that buys no services, employs nobody, and has more than doubled since 2021.",
     details: [
-      "~£106bn/year in interest payments — larger than the entire defence budget",
-      "UK national debt stands at ~100% of GDP, the highest since the 1960s",
-      "~25% of UK debt is index-linked to RPI inflation — costs surged when inflation hit 11% in 2022",
-      "Debt is owned by pension funds, insurance companies, overseas investors and the Bank of England",
-      "Every 1% rise in interest rates adds ~£20bn to annual borrowing costs",
-      "Every pound spent on interest is a pound not spent on hospitals, schools or roads",
-      "The Office for Budget Responsibility forecasts interest costs to remain elevated until the 2030s",
+      { text: "~£106bn/year in interest payments — larger than the entire defence budget", sub: 1.0 },
+      { text: "UK national debt stands at ~100% of GDP, the highest since the 1960s" },
+      { text: "~25% of UK debt is index-linked to RPI inflation — costs surged when inflation hit 11% in 2022" },
+      { text: "Debt is owned by pension funds, insurance companies, overseas investors and the Bank of England" },
+      { text: "Every 1% rise in interest rates adds ~£20bn to annual borrowing costs" },
+      { text: "Every pound spent on interest is a pound not spent on hospitals, schools or roads" },
+      { text: "The Office for Budget Responsibility forecasts costs to remain elevated until the 2030s" },
     ],
   },
   {
     category: "Defence", emoji: "⚔️", proportion: 0.049, color: "#8B7EC8",
     description: "Funds the British Army, Royal Navy and Royal Air Force — personnel, equipment, nuclear deterrent, and the UK's NATO commitments.",
     details: [
-      "~196,000 regular armed forces personnel plus ~37,000 reserves",
-      "Equipment procurement ~£12bn — F-35B jets, Type 26 frigates, Ajax armoured vehicles, drones",
-      "Trident nuclear deterrent ~£3bn/year — four Vanguard submarines maintain continuous at-sea deterrence",
-      "Intelligence agencies: GCHQ, MI5 (domestic) and MI6 (overseas) — budgets classified but ~£3.5bn total",
-      "NATO commitment: UK pledges 2.5% of GDP on defence by 2027, up from current 2.3%",
-      "Veterans' pensions, mental health support and the Armed Forces Covenant",
-      "Defence Science & Technology Laboratory (Dstl) — research into cyber, AI and future weapons",
+      { text: "~196,000 regular armed forces personnel plus ~37,000 reserves — pay, pensions & training", sub: 0.309 },
+      { text: "Equipment procurement ~£12bn — F-35B jets, Type 26 frigates, Ajax armoured vehicles, drones", sub: 0.206 },
+      { text: "Trident nuclear deterrent ~£3bn/year — four Vanguard submarines, continuous at-sea deterrence", sub: 0.051 },
+      { text: "Intelligence agencies: GCHQ, MI5 (domestic) and MI6 (overseas) — ~£3.5bn total", sub: 0.060 },
+      { text: "NATO commitment: UK pledges 2.5% of GDP on defence by 2027, up from current 2.3%" },
+      { text: "Veterans' pensions, mental health support and the Armed Forces Covenant", sub: 0.237 },
+      { text: "Defence Science & Technology Laboratory (Dstl) — research into cyber, AI and future weapons", sub: 0.137 },
     ],
   },
   {
     category: "Transport", emoji: "🚇", proportion: 0.038, color: "#4DBFBF",
     description: "Keeps Britain moving — railways, motorways, local roads, buses and the long-term infrastructure projects that shape the country for decades.",
     details: [
-      "Network Rail / Great British Railways ~£10bn — track, signals, stations and train operating subsidies",
-      "Road Investment Strategy ~£5bn/year — motorway upgrades, A-road dualling, junction improvements",
-      "HS2 Phase 1 (Old Oak Common to Birmingham) — still under construction, budget now ~£67bn",
-      "Transport for London (TfL) grants ~£1.5bn — supports the Tube, buses and Elizabeth line across Greater London",
-      "Local transport capital grants — funding bus lanes, cycling infrastructure, pedestrian zones",
-      "Bus Service Improvement Plans — government subsidy for unprofitable rural and evening routes",
-      "Port and aviation infrastructure investment, active travel (walking & cycling) programmes",
+      { text: "Network Rail / Great British Railways ~£10bn — track, signals, stations and train operating subsidies", sub: 0.221 },
+      { text: "Road Investment Strategy ~£5bn/year — motorway upgrades, A-road dualling, junction improvements", sub: 0.111 },
+      { text: "HS2 Phase 1 (Old Oak Common to Birmingham) — still under construction, budget now ~£67bn", sub: 0.111 },
+      { text: "Transport for London (TfL) grants ~£1.5bn — supports the Tube, buses and Elizabeth line", sub: 0.033 },
+      { text: "Local transport capital grants — bus lanes, cycling infrastructure, pedestrian zones", sub: 0.310 },
+      { text: "Bus Service Improvement Plans — government subsidy for unprofitable rural and evening routes", sub: 0.133 },
+      { text: "Port and aviation investment, active travel (walking & cycling) programmes", sub: 0.081 },
     ],
   },
   {
     category: "Public Order & Safety", emoji: "👮", proportion: 0.034, color: "#E07B39",
     description: "Funds policing, the justice system and prisons — from neighbourhood beat officers to the Crown Court and the probation service.",
     details: [
-      "Home Office police grants ~£14bn — funds 43 territorial police forces across England & Wales",
-      "HM Prison & Probation Service ~£5bn — 121 prisons holding ~87,000 prisoners (near record capacity)",
-      "Crown Prosecution Service & courts ~£4bn — processing ~1.7 million criminal cases per year",
-      "Border Force & Immigration Enforcement — airports, ports, visa processing and removals",
-      "National Crime Agency (NCA) — targeting organised crime, drug trafficking, child exploitation",
-      "Counter-terrorism policing and MI5 domestic intelligence operations",
-      "Legal Aid ~£2.2bn — funds defence lawyers and civil cases for those who cannot afford representation",
+      { text: "Home Office police grants ~£14bn — funds 43 territorial police forces across England & Wales", sub: 0.347 },
+      { text: "HM Prison & Probation Service ~£5bn — 121 prisons holding ~87,000 prisoners (near record capacity)", sub: 0.124 },
+      { text: "Crown Prosecution Service & courts ~£4bn — processing ~1.7 million criminal cases per year", sub: 0.099 },
+      { text: "Border Force & Immigration Enforcement — airports, ports, visa processing and removals", sub: 0.124 },
+      { text: "National Crime Agency (NCA) — targeting organised crime, drug trafficking, child exploitation", sub: 0.099 },
+      { text: "Counter-terrorism policing and MI5 domestic intelligence operations", sub: 0.099 },
+      { text: "Legal Aid ~£2.2bn — funds defence lawyers and civil cases for those who cannot afford representation", sub: 0.054 },
     ],
   },
   {
     category: "Housing & Environment", emoji: "🌳", proportion: 0.029, color: "#5BAD8F",
     description: "Building affordable homes, defending against floods, and funding the transition to net zero — investment in where and how we live.",
     details: [
-      "Affordable Homes Programme (Homes England) ~£4bn — targets 1.5m new homes by 2029",
-      "Environment Agency flood defences ~£1bn/year — protecting 314,000 properties from flooding",
-      "Green Homes Grant successors — heat pump grants (£7,500), home insulation, solar incentives",
-      "Social housing decarbonisation fund — improving EPC ratings in council and housing association stock",
-      "Nature recovery & biodiversity net gain — 30×30 target to protect 30% of UK land by 2030",
-      "Planning Reform — National Planning Policy Framework changes to unlock housing land",
-      "Coastal erosion and water quality programmes (rivers and bathing waters)",
+      { text: "Affordable Homes Programme (Homes England) ~£4bn — targets 1.5m new homes by 2029", sub: 0.290 },
+      { text: "Green Homes Grant successors — heat pump grants (£7,500), home insulation, solar incentives", sub: 0.218 },
+      { text: "Social housing decarbonisation fund — improving EPC ratings in council and housing association stock", sub: 0.145 },
+      { text: "Environment Agency flood defences ~£1bn/year — protecting 314,000 properties from flooding", sub: 0.073 },
+      { text: "Nature recovery & biodiversity net gain — 30×30 target to protect 30% of UK land by 2030", sub: 0.145 },
+      { text: "Planning Reform — National Planning Policy Framework changes to unlock housing land", sub: 0.058 },
+      { text: "Coastal erosion and water quality programmes (rivers and bathing waters)", sub: 0.071 },
     ],
   },
   {
     category: "Business & Industry", emoji: "🏭", proportion: 0.028, color: "#C46CB0",
     description: "Supporting UK businesses to start, grow, export and innovate — from university spinouts to manufacturing investment and trade deals.",
     details: [
-      "UK Research & Innovation (UKRI) ~£9bn — funds seven research councils plus Innovate UK grants",
-      "British Business Bank — £13bn in finance to 97,000 smaller businesses (loans, equity, guarantees)",
-      "Semiconductor Strategy — attracting chip design and manufacturing investment to the UK",
-      "Freeports & Investment Zones — tax incentives in 12 designated areas including East Midlands and Teesside",
-      "UK Export Finance (UKEF) — £8.5bn in guarantees helping UK firms win overseas contracts",
-      "Industrial Strategy — long-term sector plans for clean energy, life sciences, creative industries and AI",
-      "Competition & Markets Authority (CMA) — enforces competition law, reviews mergers including tech",
+      { text: "UK Research & Innovation (UKRI) ~£9bn — funds seven research councils plus Innovate UK grants", sub: 0.270 },
+      { text: "British Business Bank — £13bn in finance to 97,000 smaller businesses (loans, equity, guarantees)", sub: 0.180 },
+      { text: "Semiconductor Strategy & advanced manufacturing investment zones", sub: 0.120 },
+      { text: "Freeports & Investment Zones — tax incentives in 12 designated areas across England", sub: 0.120 },
+      { text: "UK Export Finance (UKEF) — £8.5bn in guarantees helping UK firms win overseas contracts", sub: 0.150 },
+      { text: "Industrial Strategy — long-term sector plans for clean energy, life sciences and AI", sub: 0.100 },
+      { text: "Competition & Markets Authority (CMA) — enforces competition law, reviews major mergers", sub: 0.060 },
     ],
   },
   {
     category: "Foreign Affairs & Aid", emoji: "🌍", proportion: 0.013, color: "#7A9E7E",
     description: "Projecting British influence abroad — diplomacy, development assistance, the BBC World Service and contributions to international organisations.",
     details: [
-      "Foreign Commonwealth & Development Office (FCDO) — 281 embassies, high commissions and consulates",
-      "Official Development Assistance (ODA) — currently 0.5% GNI (~£15bn), down from 0.7% target",
-      "Climate finance for developing nations — UK pledged £11.6bn 2021–2025 for clean energy transition",
-      "British Council — English language teaching and cultural diplomacy in 100+ countries",
-      "BBC World Service — reaches 492 million people weekly in 42 languages (part-funded by FCDO)",
-      "United Nations assessed contributions — UK is 4th largest contributor to UN regular budget",
-      "Peacekeeping operations — UK troops in Mali, Kosovo, Cyprus, South Sudan and elsewhere",
+      { text: "Official Development Assistance (ODA) ~£15bn — 0.5% GNI, down from 0.7% target", sub: 0.968 },
+      { text: "Foreign Commonwealth & Development Office (FCDO) — 281 embassies and high commissions" },
+      { text: "Climate finance for developing nations — UK pledged £11.6bn 2021–2025 for clean energy" },
+      { text: "British Council — English language teaching and cultural diplomacy in 100+ countries" },
+      { text: "BBC World Service — reaches 492 million people weekly in 42 languages (part-funded by FCDO)" },
+      { text: "United Nations assessed contributions — UK is 4th largest contributor to the UN regular budget" },
+      { text: "Peacekeeping operations — UK troops in Kosovo, Cyprus, South Sudan and elsewhere" },
     ],
   },
   {
     category: "Everything Else", emoji: "📋", proportion: 0.14, color: "#AAB0B8",
     description: "Devolved block grants to Scotland, Wales and Northern Ireland, plus central administration, culture, digital and the institutions that run the state.",
     details: [
-      "Scottish block grant ~£42bn (Barnett formula) — funds NHS Scotland, Scottish schools, policing",
-      "Welsh block grant ~£19bn — funds NHS Wales, schools, transport and Welsh Government programmes",
-      "Northern Ireland block grant ~£14bn — funds Stormont departments and public services",
-      "HMRC administration ~£5bn — collects £900bn+ in taxes annually; funds 65,000 staff",
-      "Department for Culture, Media & Sport — BBC (licence fee), arts (Arts Council), Sport England",
-      "Cabinet Office & civil service reform — government efficiency, procurement, cyber security (NCSC)",
-      "Parliamentary & electoral services — running Parliament, the Electoral Commission and referendums",
+      { text: "Scottish block grant ~£42bn (Barnett formula) — funds NHS Scotland, Scottish schools, policing", sub: 0.252 },
+      { text: "Welsh block grant ~£19bn — funds NHS Wales, schools, transport and Welsh Government programmes", sub: 0.114 },
+      { text: "Northern Ireland block grant ~£14bn — funds Stormont departments and public services", sub: 0.084 },
+      { text: "HMRC administration ~£5bn — collects £900bn+ in taxes annually; funds 65,000 staff", sub: 0.030 },
+      { text: "Department for Culture, Media & Sport — BBC (licence fee), arts (Arts Council), Sport England", sub: 0.090 },
+      { text: "Cabinet Office & civil service reform — government efficiency, procurement, cyber security (NCSC)", sub: 0.180 },
+      { text: "Parliamentary & electoral services — running Parliament, the Electoral Commission and referendums", sub: 0.250 },
     ],
   },
 ];
@@ -225,126 +230,120 @@ const LOCAL_SPENDING_BASE = [
     category: "Adult Social Care", emoji: "👴", proportion: 0.39, color: "#4F86C6",
     description: "The single biggest pressure on councils — supporting older people and disabled adults to live safely and with dignity. Demand is rising faster than funding.",
     details: [
-      "Residential & nursing care placements — council funds those who cannot afford ~£1,200/week care home fees",
-      "Home care packages — paid carers visiting people in their own homes (typically 3–4 visits/day)",
-      "Direct Payments — cash given to disabled adults to arrange their own personal care and support",
-      "Learning disability supported living — 24-hour support for people with complex needs in the community",
-      "Mental health community support — step-down services, crisis housing, day centres",
-      "Occupational therapy, equipment & adaptations (stairlifts, wet rooms, grab rails)",
-      "Carer support services — respite breaks and advice for 6.5 million unpaid carers in England",
-      "NHS-funded continuing healthcare — councils assess eligibility; NHS pays for those who qualify",
+      { text: "Residential & nursing care placements — council funds those who cannot afford ~£1,200/week care home fees", sub: 0.38 },
+      { text: "Home care packages — paid carers visiting people in their own homes (typically 3–4 visits/day)", sub: 0.28 },
+      { text: "Direct Payments — cash given to disabled adults to arrange their own personal care and support", sub: 0.12 },
+      { text: "Learning disability supported living — 24-hour support for people with complex needs in the community", sub: 0.09 },
+      { text: "Mental health community support — step-down services, crisis housing, day centres", sub: 0.06 },
+      { text: "Occupational therapy, equipment & adaptations (stairlifts, wet rooms, grab rails)", sub: 0.04 },
+      { text: "Carer support services — respite breaks and advice for 6.5 million unpaid carers in England", sub: 0.03 },
     ],
   },
   {
     category: "Children's Services", emoji: "👶", proportion: 0.2, color: "#E05C5C",
     description: "Protecting vulnerable children and supporting families — from early help to child protection, fostering and specialist education. Costs have risen 130% in a decade.",
     details: [
-      "Child Protection investigations (Section 47) — triggered when abuse or neglect is suspected",
-      "Looked-After Children — councils are 'corporate parent' to ~83,000 children in care in England",
-      "Foster care payments — average £450/week per child; severe shortage of foster carers nationally",
-      "Children's residential homes — for the most complex cases; can cost £250,000+ per child per year",
-      "Child and Adolescent Mental Health Services (CAMHS) — 18-month average waits in many areas",
-      "Early Help & family support — preventing cases escalating to child protection (saves money long-term)",
-      "Youth Offending Teams — diverting young people from the criminal justice system",
-      "Special Educational Needs (SEND) transport — councils legally required to fund transport to specialist schools",
+      { text: "Looked-After Children — councils are 'corporate parent' to ~83,000 children in care in England", sub: 0.32 },
+      { text: "Foster care payments — average £450/week per child; severe shortage of foster carers nationally", sub: 0.22 },
+      { text: "Children's residential homes — for the most complex cases; can cost £250,000+ per child per year", sub: 0.15 },
+      { text: "Child Protection investigations (Section 47) — triggered when abuse or neglect is suspected", sub: 0.12 },
+      { text: "Child and Adolescent Mental Health Services (CAMHS) — 18-month average waits in many areas", sub: 0.08 },
+      { text: "Early Help & family support — preventing cases escalating to child protection (saves money long-term)", sub: 0.07 },
+      { text: "Youth Offending Teams — diverting young people from criminal justice system", sub: 0.02 },
+      { text: "SEND transport — councils legally required to fund transport to specialist schools", sub: 0.02 },
     ],
   },
   {
     category: "Highways & Transport", emoji: "🛣️", proportion: 0.082, color: "#6DBF67",
     description: "Maintaining every road, pavement, bridge and street light that isn't a motorway or A-road — plus subsidising the bus routes that the market won't run.",
     details: [
-      "Pothole repairs & road resurfacing — councils repair ~2 million potholes per year; backlog costs ~£16bn nationally",
-      "Street lighting — councils own ~5 million street lights; increasingly switching to LED to cut energy costs",
-      "Winter maintenance — gritting routes, snow clearance; a harsh winter can cost councils millions extra",
-      "Traffic signals, pedestrian crossings & road markings — keeping junctions safe and flowing",
-      "Pavement & footpath maintenance — legal duty to maintain; councils face claims for trip injuries",
-      "Bus route subsidies — councils fund routes that commercial operators won't run (evenings, rural areas)",
-      "Cycle lanes & active travel infrastructure — funded partly by central Active Travel England grants",
-      "Bridge inspections and weight restrictions — structural maintenance of thousands of local bridges",
+      { text: "Pothole repairs & road resurfacing — councils repair ~2 million potholes per year; national backlog ~£16bn", sub: 0.25 },
+      { text: "Street lighting — councils own ~5 million street lights; increasingly switching to LED to cut energy costs", sub: 0.15 },
+      { text: "Pavement & footpath maintenance — legal duty to maintain; councils face claims for trip injuries", sub: 0.15 },
+      { text: "Winter maintenance — gritting routes, snow clearance; a harsh winter can cost councils millions extra", sub: 0.12 },
+      { text: "Traffic signals, pedestrian crossings & road markings — keeping junctions safe and flowing", sub: 0.10 },
+      { text: "Bus route subsidies — councils fund routes commercial operators won't run (evenings, rural areas)", sub: 0.13 },
+      { text: "Cycle lanes & active travel infrastructure — funded partly by Active Travel England grants", sub: 0.07 },
+      { text: "Bridge inspections and weight restrictions — structural maintenance of thousands of local bridges", sub: 0.03 },
     ],
   },
   {
     category: "Environment & Waste", emoji: "♻️", proportion: 0.075, color: "#F0A500",
     description: "From your weekly bin collection to the parks your children play in — the visible, everyday services that define quality of life in a neighbourhood.",
     details: [
-      "Residual waste collection — most councils collect black/grey bins fortnightly (landfill tax ~£103/tonne)",
-      "Recycling collection — separate collections for paper, glass, plastics, food waste (varies by council)",
-      "Household Waste Recycling Centres (tips) — councils under pressure to close sites to cut costs",
-      "Street cleaning & litter enforcement — fixed penalty notices of £150 for littering",
-      "Parks, play areas & open spaces — councils maintain ~27,000 parks and green spaces in England",
-      "Tree maintenance — statutory duty; failure to maintain can lead to expensive legal claims",
-      "Dog warden services & fly-tipping enforcement — fines up to £400 for fly-tipping",
-      "Environmental health: noise complaints, pest control, contaminated land investigations",
+      { text: "Residual waste collection — most councils collect black/grey bins fortnightly (landfill tax ~£103/tonne)", sub: 0.35 },
+      { text: "Recycling collection — separate collections for paper, glass, plastics, food waste (varies by council)", sub: 0.25 },
+      { text: "Parks, play areas & open spaces — councils maintain ~27,000 parks and green spaces in England", sub: 0.15 },
+      { text: "Street cleaning & litter enforcement — fixed penalty notices of £150 for littering", sub: 0.12 },
+      { text: "Household Waste Recycling Centres (tips) — councils under pressure to close sites to cut costs", sub: 0.07 },
+      { text: "Tree maintenance — statutory duty; failure to maintain can lead to expensive legal claims", sub: 0.04 },
+      { text: "Dog warden services & fly-tipping enforcement — fines up to £400 for fly-tipping", sub: 0.02 },
     ],
   },
   {
     category: "Police Precept", emoji: "🚔", proportion: 0.061, color: "#8B7EC8",
     description: "Your council tax contributes directly to your local police force via the Police & Crime Commissioner — this is on top of the Home Office central police grant.",
     details: [
-      "Funds your local Police & Crime Commissioner (PCC) — elected to hold the Chief Constable to account",
-      "Neighbourhood policing teams — local beat officers, PCSOs and community engagement",
-      "Response policing — officers attending 999 and 101 calls (response times vary widely by area)",
-      "Criminal Investigation Departments (CID) — detectives handling serious and complex crimes",
-      "Domestic Abuse & Violence Against Women & Girls (VAWG) units",
-      "Road policing, firearms units, dogs and mounted sections",
-      "The precept is separate from the national police grant — councils can raise it by up to 3% without a referendum",
-      "Police workforce: ~149,000 officers in England & Wales, plus ~70,000 staff and 8,000 PCSOs",
+      { text: "Response policing — officers attending 999 and 101 calls (response times vary widely by area)", sub: 0.35 },
+      { text: "Criminal Investigation Departments (CID) — detectives handling serious and complex crimes", sub: 0.25 },
+      { text: "Neighbourhood policing teams — local beat officers, PCSOs and community engagement", sub: 0.15 },
+      { text: "Domestic Abuse & Violence Against Women & Girls (VAWG) specialist units", sub: 0.10 },
+      { text: "Road policing, firearms units, dogs and mounted sections", sub: 0.10 },
+      { text: "Police & Crime Commissioner (PCC) office — elected to hold the Chief Constable to account", sub: 0.03 },
+      { text: "Police workforce: ~149,000 officers in England & Wales, plus ~70,000 staff and 8,000 PCSOs" },
     ],
   },
   {
     category: "Housing & Planning", emoji: "🏘️", proportion: 0.043, color: "#4DBFBF",
     description: "Tackling homelessness, managing planning applications, and making sure housing is safe and available — one of councils' most legally demanding responsibilities.",
     details: [
-      "Homelessness prevention — councils have a legal 'prevention duty' to help anyone at risk of losing their home",
-      "Temporary accommodation — councils spend ~£1.7bn/year housing families in B&Bs and hostels",
-      "Housing advice service — debt counselling, tenant rights, help avoiding eviction",
-      "Planning application processing — major developments, extensions, changes of use",
-      "Building control & inspections — checking new builds meet fire safety and structural standards (post-Grenfell reforms)",
-      "Housing register & allocation — managing waiting lists for social housing (1.3 million households waiting in England)",
-      "Empty homes programmes — incentives and enforcement to bring vacant properties back into use",
-      "Rough sleeper outreach & Housing First — getting people off the streets into permanent accommodation",
+      { text: "Temporary accommodation — councils spend ~£1.7bn/year housing families in B&Bs and hostels", sub: 0.40 },
+      { text: "Planning application processing — major developments, extensions, changes of use", sub: 0.15 },
+      { text: "Building control & inspections — checking new builds meet fire safety standards (post-Grenfell reforms)", sub: 0.10 },
+      { text: "Homelessness prevention — councils have a legal duty to help anyone at risk of losing their home", sub: 0.12 },
+      { text: "Housing register & allocation — 1.3 million households on waiting lists in England", sub: 0.08 },
+      { text: "Rough sleeper outreach & Housing First — getting people off the streets into permanent accommodation", sub: 0.10 },
+      { text: "Empty homes programmes — incentives and enforcement to bring vacant properties back into use", sub: 0.05 },
     ],
   },
   {
     category: "Culture, Sport & Libraries", emoji: "📚", proportion: 0.028, color: "#E07B39",
-    description: "The services that make a place worth living in — public libraries, leisure centres, museums, arts and cultural venues. Frequently cut first when budgets are tight.",
+    description: "The services that make a place worth living in — public libraries, leisure centres, museums, arts and cultural venues. Frequently the first to be cut when budgets are tight.",
     details: [
-      "Public libraries — 2,700 libraries remain open in England; 800 have closed since 2010",
-      "Library services: book loans, e-books, computers and internet access, job-search support, children's reading schemes",
-      "Leisure centres & swimming pools — most are outsourced but councils subsidise access for low-income residents",
-      "Museums & local heritage sites — from county museums to Roman remains and industrial heritage",
-      "Arts grants & community festivals — small grants to local theatre companies, choirs, community events",
-      "Allotment provision — councils have a statutory duty to provide allotments where demand exists",
-      "Youth clubs & community centres — increasingly handed to voluntary sector or closed",
-      "Public art, war memorials and civic spaces — maintenance of shared cultural infrastructure",
+      { text: "Leisure centres & swimming pools — most are outsourced but councils subsidise access for low-income residents", sub: 0.30 },
+      { text: "Public libraries — 2,700 libraries remain open in England; 800 have closed since 2010", sub: 0.25 },
+      { text: "Museums & local heritage sites — from county museums to Roman remains and industrial heritage", sub: 0.15 },
+      { text: "Youth clubs & community centres — increasingly handed to the voluntary sector or closed", sub: 0.12 },
+      { text: "Arts grants & community festivals — small grants to local theatre companies, choirs, events", sub: 0.10 },
+      { text: "Allotment provision — councils have a statutory duty to provide allotments where demand exists", sub: 0.05 },
+      { text: "Public art, war memorials and civic spaces — maintenance of shared cultural infrastructure", sub: 0.03 },
     ],
   },
   {
     category: "Fire & Rescue Precept", emoji: "🚒", proportion: 0.021, color: "#5BAD8F",
     description: "Funds your local Fire & Rescue Authority — the service that responds to fires, road crashes, floods and industrial incidents 24 hours a day.",
     details: [
-      "50 Fire & Rescue Services in England — some run by councils, some by combined fire authorities",
-      "~29,000 wholetime firefighters and ~17,000 on-call (retained) firefighters",
-      "Fire stations, fire engines and specialist appliances (aerial platforms, rescue boats, water carriers)",
-      "Fire investigation — determining cause and origin of fires, supporting criminal investigations",
-      "Community fire safety — home fire safety visits, fitting free smoke alarms, school education visits",
-      "Technical rescue — road traffic collisions, water rescue, industrial accidents, urban search & rescue",
-      "Responding to flooding — pumping out flooded properties; increasingly busy due to climate change",
-      "Fire Safety inspections of high-rise buildings — greatly expanded post-Grenfell Tower fire (2017)",
+      { text: "~29,000 wholetime firefighters — salaries, training and pensions make up the majority of costs", sub: 0.55 },
+      { text: "Fire stations, fire engines & specialist appliances (aerial platforms, rescue boats, water carriers)", sub: 0.20 },
+      { text: "On-call (retained) firefighters — ~17,000 across England, vital for rural coverage", sub: 0.10 },
+      { text: "Community fire safety — home visits, free smoke alarms, school education programmes", sub: 0.05 },
+      { text: "Technical rescue — road crashes, water rescue, industrial accidents, urban search & rescue", sub: 0.05 },
+      { text: "Responding to flooding — pumping out flooded properties; increasingly busy due to climate change", sub: 0.03 },
+      { text: "Fire safety inspections of high-rise buildings — greatly expanded post-Grenfell Tower (2017)", sub: 0.02 },
     ],
   },
   {
     category: "Other Council Services", emoji: "🏛️", proportion: 0.12, color: "#AAB0B8",
     description: "The wide range of statutory and discretionary services a council provides — from registering births to running elections to protecting consumers.",
     details: [
-      "Register Office — births, deaths and marriages; 600,000+ births registered in England per year",
-      "Electoral services — running local elections, maintaining the electoral register, postal vote processing",
-      "Trading Standards — prosecuting rogue traders, counterfeit goods, underage sales enforcement",
-      "Environmental Health — food hygiene inspections, noise complaints, private rented housing standards",
-      "Licensing — pubs, nightclubs, taxis, HMOs, scrap metal dealers, sex establishments",
-      "Coroner's service — investigating sudden, unexplained or violent deaths (legally required)",
-      "Economic development — business support, market towns, town centre management, regeneration projects",
-      "Democratic services — running full council meetings, scrutiny committees, planning committees",
+      { text: "Economic development — business support, market towns, town centre management, regeneration", sub: 0.25 },
+      { text: "Democratic services — running council meetings, scrutiny committees, planning committees", sub: 0.20 },
+      { text: "Environmental Health — food hygiene inspections, noise complaints, private rented housing standards", sub: 0.15 },
+      { text: "Trading Standards — prosecuting rogue traders, counterfeit goods, underage sales enforcement", sub: 0.10 },
+      { text: "Licensing — pubs, nightclubs, taxis, HMOs, scrap metal dealers, sex establishments", sub: 0.10 },
+      { text: "Electoral services — running local elections, maintaining the electoral register", sub: 0.08 },
+      { text: "Register Office — births, deaths and marriages; 600,000+ births registered per year", sub: 0.07 },
+      { text: "Coroner's service — investigating sudden, unexplained or violent deaths (legally required)", sub: 0.05 },
     ],
   },
 ];
@@ -740,7 +739,12 @@ function DonutChart({ items, total, title }: DonutChartProps) {
                           {item.details.map((d, i) => (
                             <li key={i} className="flex gap-2 items-start">
                               <span className="flex-shrink-0 mt-[5px] w-1.5 h-1.5 rounded-full" style={{ background: item.color }} />
-                              <span className="text-[12px] text-white/55 leading-relaxed">{d}</span>
+                              <span className="text-[12px] text-white/55 leading-relaxed flex-1">{d.text}</span>
+                              {d.sub !== undefined && (
+                                <span className="flex-shrink-0 text-[12px] font-semibold tabular-nums" style={{ color: item.color }}>
+                                  {fmt(item.userAmount * d.sub)}
+                                </span>
+                              )}
                             </li>
                           ))}
                         </ul>
@@ -761,11 +765,16 @@ function DonutChart({ items, total, title }: DonutChartProps) {
 // Stat card
 // ---------------------------------------------------------------------------
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function StatCard({ label, value, sub, muted }: { label: string; value: string; sub?: string; muted?: boolean }) {
   return (
-    <div className="card p-4 flex flex-col gap-1.5">
+    <div className="card p-4 flex flex-col gap-1.5" style={{ opacity: muted ? 0.5 : 1, transition: "opacity 0.4s" }}>
       <p className="text-[9px] tracking-[0.3em] uppercase font-bold text-white/40 leading-tight">{label}</p>
-      <p className="text-xl sm:text-2xl font-bold font-display text-amber-400 leading-none">{value}</p>
+      <p
+        className="text-xl sm:text-2xl font-bold font-display leading-none"
+        style={{ color: muted ? "rgba(245,245,245,0.45)" : "#FFBF00", transition: "color 0.4s" }}
+      >
+        {value}
+      </p>
       {sub && <p className="text-[11px] text-white/40 leading-snug">{sub}</p>}
     </div>
   );
@@ -792,6 +801,9 @@ function SkeletonRow() {
 // Page
 // ---------------------------------------------------------------------------
 
+// 0=hidden 1=incomeTax 2=ni 3=totals 4=chart1 5=chart2
+type RevealStep = 0 | 1 | 2 | 3 | 4 | 5;
+
 export default function TaxBreakdownPage() {
   const [salary, setSalary] = useState("");
   const [postcode, setPostcode] = useState("");
@@ -799,6 +811,7 @@ export default function TaxBreakdownPage() {
   const [postcodeError, setPostcodeError] = useState("");
   const [salaryError, setSalaryError] = useState("");
   const [result, setResult] = useState<PageResult | null>(null);
+  const [revealStep, setRevealStep] = useState<RevealStep>(0);
   const resultRef = useRef<HTMLDivElement>(null);
 
   const handleCalculate = useCallback(async () => {
@@ -848,11 +861,18 @@ export default function TaxBreakdownPage() {
       }));
 
       setResult({ tax, council, centralItems, localItems });
+      setRevealStep(0);
 
-      // Scroll to results after render
+      // Step-by-step reveal sequence
+      setTimeout(() => { setRevealStep(1); }, 150);
+      setTimeout(() => { setRevealStep(2); }, 900);
+      setTimeout(() => { setRevealStep(3); }, 1700);
+      setTimeout(() => { setRevealStep(4); }, 2600);
+      setTimeout(() => { setRevealStep(5); }, 3300);
+
       setTimeout(() => {
         resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 100);
+      }, 200);
     } catch {
       setPostcodeError("Unable to look up postcode. Please try again.");
     } finally {
@@ -999,85 +1019,138 @@ export default function TaxBreakdownPage() {
         </AnimatePresence>
 
         {/* Results */}
-        <AnimatePresence>
-          {result && !loading && (
-            <motion.div
-              key="results"
-              ref={resultRef}
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="space-y-8"
-            >
+        {result && !loading && (
+          <div ref={resultRef} className="space-y-8">
 
-              {/* Below-threshold notice */}
-              {result.tax.belowThreshold && (
-                <div
+            {/* Below-threshold notice */}
+            <AnimatePresence>
+              {result.tax.belowThreshold && revealStep >= 1 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
                   className="rounded-xl p-4 text-sm text-amber-300 border"
                   style={{ background: "rgba(255,191,0,0.06)", borderColor: "rgba(255,191,0,0.18)" }}
                 >
                   Your salary is below the £12,570 personal allowance threshold — no income tax or National Insurance is due.
-                </div>
+                </motion.div>
               )}
+            </AnimatePresence>
 
-              {/* Section A — Your Contribution */}
-              <div className="space-y-3">
-                <p className="text-[9px] tracking-[0.3em] uppercase font-bold text-white/40">Your contribution</p>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  <StatCard
-                    label="Income Tax"
-                    value={fmt(result.tax.incomeTax)}
-                    sub="Per year"
-                  />
-                  <StatCard
-                    label="National Insurance"
-                    value={fmt(result.tax.nationalInsurance)}
-                    sub="Per year"
-                  />
-                  <StatCard
-                    label="Total — Central Govt"
-                    value={fmt(result.tax.totalCentralContribution)}
-                    sub="Income tax + NI combined"
-                  />
-                  <StatCard
-                    label={`Council Tax — Band D`}
-                    value={fmt(result.council.bandD)}
-                    sub={result.council.authorityName}
-                  />
-                </div>
+            {/* Section A — Your Contribution (step-by-step reveal) */}
+            <div className="space-y-3">
+              <AnimatePresence>
+                {revealStep >= 1 && (
+                  <motion.p
+                    key="contrib-label"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-[9px] tracking-[0.3em] uppercase font-bold text-white/40"
+                  >
+                    Your contribution
+                  </motion.p>
+                )}
+              </AnimatePresence>
+
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* Income Tax — appears at step 1, dimmed until step 3 */}
+                <AnimatePresence>
+                  {revealStep >= 1 && (
+                    <motion.div key="it" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+                      <StatCard label="Income Tax" value={fmt(result.tax.incomeTax)} sub="Per year" muted={revealStep < 3} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* NI — appears at step 2, dimmed until step 3 */}
+                <AnimatePresence>
+                  {revealStep >= 2 && (
+                    <motion.div key="ni" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+                      <StatCard label="National Insurance" value={fmt(result.tax.nationalInsurance)} sub="Per year" muted={revealStep < 3} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Total central + council tax — appear at step 3 in amber */}
+                <AnimatePresence>
+                  {revealStep >= 3 && (
+                    <motion.div key="total" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.4, type: "spring", stiffness: 200 }}>
+                      <StatCard label="Total — Central Govt" value={fmt(result.tax.totalCentralContribution)} sub="Income tax + NI combined" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                <AnimatePresence>
+                  {revealStep >= 3 && (
+                    <motion.div key="council" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.4, delay: 0.1, type: "spring", stiffness: 200 }}>
+                      <StatCard label="Council Tax — Band D" value={fmt(result.council.bandD)} sub={result.council.authorityName} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
+            </div>
 
-              {/* Section B — Donut charts */}
-              <div className="space-y-3">
-                <p className="text-[9px] tracking-[0.3em] uppercase font-bold text-white/40">Your tax split</p>
-                <div className="flex flex-col gap-6">
-                  <div className="card p-6">
-                    <DonutChart
-                      items={result.centralItems}
-                      total={result.tax.totalCentralContribution}
-                      title="National spending (income tax + NI)"
-                    />
+            {/* Section B — Donut charts revealed one at a time */}
+            <AnimatePresence>
+              {revealStep >= 4 && (
+                <motion.div
+                  key="charts"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="space-y-3"
+                >
+                  <p className="text-[9px] tracking-[0.3em] uppercase font-bold text-white/40">Your tax split</p>
+                  <div className="flex flex-col gap-6">
+                    <motion.div
+                      className="card p-6"
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.5 }}
+                    >
+                      <DonutChart
+                        items={result.centralItems}
+                        total={result.tax.totalCentralContribution}
+                        title="National spending (income tax + NI)"
+                      />
+                    </motion.div>
+
+                    <AnimatePresence>
+                      {revealStep >= 5 && (
+                        <motion.div
+                          className="card p-6"
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.5 }}
+                        >
+                          <DonutChart
+                            items={result.localItems}
+                            total={result.council.bandD}
+                            title="Local council spending (council tax)"
+                          />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-                  <div className="card p-6">
-                    <DonutChart
-                      items={result.localItems}
-                      total={result.council.bandD}
-                      title="Local council spending (council tax)"
-                    />
-                  </div>
-                </div>
-              </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-              {/* Section C — Disclaimer */}
-              <p className="text-[11px] text-white/30 leading-relaxed max-w-3xl">
-                Figures are estimates based on Band D council tax and are proportional to published HM Treasury PESA 2023/24
-                and DLUHC 2024/25 data. postcodes.io used for postcode lookup. Individual council tax bills depend on property
-                band and applicable discounts.
-              </p>
+            {/* Section C — Disclaimer */}
+            <AnimatePresence>
+              {revealStep >= 5 && (
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.5 }}
+                  className="text-[11px] text-white/30 leading-relaxed max-w-3xl"
+                >
+                  Figures are estimates based on Band D council tax and are proportional to published HM Treasury PESA 2023/24
+                  and DLUHC 2024/25 data. postcodes.io used for postcode lookup. Individual council tax bills depend on property
+                  band and applicable discounts.
+                </motion.p>
+              )}
+            </AnimatePresence>
 
-            </motion.div>
-          )}
-        </AnimatePresence>
+          </div>
+        )}
 
       </div>
     </div>
