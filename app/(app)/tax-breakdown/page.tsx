@@ -396,8 +396,8 @@ function DonutChart({ items, total, title }: DonutChartProps) {
       <div className="flex flex-col sm:flex-row sm:items-start gap-5 w-full">
 
         {/* SVG donut */}
-        <div className="flex-shrink-0 flex justify-center sm:justify-start">
-          <svg width="220" height="220" viewBox="0 0 220 220">
+        <div className="flex-shrink-0 flex justify-center sm:justify-start" style={{ width: "min(220px, 100%)" }}>
+          <svg width="220" height="220" viewBox="0 0 220 220" style={{ width: "100%", height: "auto" }}>
             {slices.map((s) => {
               const isActive = hovered === s.index || (hovered === null && expanded === s.index);
               const outerR = isActive ? OUTER_R_HOVER : OUTER_R;
@@ -434,19 +434,19 @@ function DonutChart({ items, total, title }: DonutChartProps) {
               <div key={item.category}>
                 {/* Row */}
                 <div
-                  className="flex items-center gap-2.5 cursor-pointer rounded-xl px-3 py-2 transition-colors select-none"
+                  className="flex items-start gap-2.5 cursor-pointer rounded-xl px-3 py-2.5 transition-colors select-none"
                   style={{ background: isH || isE ? "rgba(255,255,255,0.06)" : "transparent" }}
                   onMouseEnter={() => setHovered(origIndex)}
                   onMouseLeave={() => setHovered(null)}
                   onClick={() => setExpanded(prev => prev === origIndex ? null : origIndex)}
                 >
-                  <span className="flex-shrink-0 w-2.5 h-2.5 rounded-full" style={{ background: item.color }} />
-                  <span className="flex-1 text-[13px] text-white/75 leading-tight min-w-0 truncate">
+                  <span className="flex-shrink-0 w-2.5 h-2.5 rounded-full mt-[3px]" style={{ background: item.color }} />
+                  <span className="flex-1 text-[13px] text-white/80 leading-snug min-w-0">
                     {item.emoji} {item.category}
                   </span>
-                  <span className="text-[11px] text-white/35 tabular-nums flex-shrink-0">{(item.proportion * 100).toFixed(1)}%</span>
-                  <span className="text-[13px] font-semibold text-amber-400 tabular-nums flex-shrink-0 w-14 text-right">{fmt(item.userAmount)}</span>
-                  <span className="text-white/25 text-[10px] flex-shrink-0">{isE ? "▲" : "▼"}</span>
+                  <span className="text-[11px] text-white/35 tabular-nums flex-shrink-0 pt-px">{(item.proportion * 100).toFixed(1)}%</span>
+                  <span className="text-[13px] font-semibold text-amber-400 tabular-nums flex-shrink-0 w-[3.5rem] text-right">{fmt(item.userAmount)}</span>
+                  <span className="text-white/30 text-[10px] flex-shrink-0 pt-px">{isE ? "▲" : "▼"}</span>
                 </div>
 
                 {/* Expandable detail panel */}
@@ -470,7 +470,7 @@ function DonutChart({ items, total, title }: DonutChartProps) {
                         <p className="text-[12px] text-white/55 leading-relaxed">{item.description}</p>
 
                         {/* Per-period breakdown */}
-                        <div className="flex gap-4">
+                        <div className="flex flex-wrap gap-x-5 gap-y-2">
                           <div>
                             <p className="text-[9px] tracking-[0.2em] uppercase text-white/30 mb-0.5">Per year</p>
                             <p className="text-sm font-bold text-amber-400">{fmt(item.userAmount)}</p>
@@ -503,10 +503,10 @@ function DonutChart({ items, total, title }: DonutChartProps) {
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="card p-4 flex flex-col gap-1">
-      <p className="text-[9px] tracking-[0.3em] uppercase font-bold text-white/40">{label}</p>
-      <p className="text-2xl font-bold font-display text-amber-400 leading-none">{value}</p>
-      {sub && <p className="text-[11px] text-white/40 leading-snug mt-0.5">{sub}</p>}
+    <div className="card p-4 flex flex-col gap-1.5">
+      <p className="text-[9px] tracking-[0.3em] uppercase font-bold text-white/40 leading-tight">{label}</p>
+      <p className="text-xl sm:text-2xl font-bold font-display text-amber-400 leading-none">{value}</p>
+      {sub && <p className="text-[11px] text-white/40 leading-snug">{sub}</p>}
     </div>
   );
 }
@@ -763,7 +763,7 @@ export default function TaxBreakdownPage() {
               {/* Section A — Your Contribution */}
               <div className="space-y-3">
                 <p className="text-[9px] tracking-[0.3em] uppercase font-bold text-white/40">Your contribution</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   <StatCard
                     label="Income Tax"
                     value={fmt(result.tax.incomeTax)}
