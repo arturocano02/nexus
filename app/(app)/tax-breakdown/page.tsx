@@ -741,7 +741,7 @@ function DonutChart({ items, total, title }: DonutChartProps) {
                               <span className="flex-shrink-0 mt-[5px] w-1.5 h-1.5 rounded-full" style={{ background: item.color }} />
                               <span className="text-[12px] text-white/55 leading-relaxed flex-1">{d.text}</span>
                               {d.sub !== undefined && (
-                                <span className="flex-shrink-0 text-[12px] font-semibold tabular-nums" style={{ color: item.color }}>
+                                <span className="flex-shrink-0 text-[12px] font-semibold tabular-nums text-amber-400">
                                   {fmt(item.userAmount * d.sub)}
                                 </span>
                               )}
@@ -767,12 +767,9 @@ function DonutChart({ items, total, title }: DonutChartProps) {
 
 function StatCard({ label, value, sub, muted }: { label: string; value: string; sub?: string; muted?: boolean }) {
   return (
-    <div className="card p-4 flex flex-col gap-1.5" style={{ opacity: muted ? 0.5 : 1, transition: "opacity 0.4s" }}>
+    <div className="card p-4 flex flex-col gap-1.5" style={{ opacity: muted ? 0.55 : 1, transition: "opacity 0.5s" }}>
       <p className="text-[9px] tracking-[0.3em] uppercase font-bold text-white/40 leading-tight">{label}</p>
-      <p
-        className="text-xl sm:text-2xl font-bold font-display leading-none"
-        style={{ color: muted ? "rgba(245,245,245,0.45)" : "#FFBF00", transition: "color 0.4s" }}
-      >
+      <p className="text-xl sm:text-2xl font-bold font-display leading-none text-amber-400">
         {value}
       </p>
       {sub && <p className="text-[11px] text-white/40 leading-snug">{sub}</p>}
@@ -1056,7 +1053,7 @@ export default function TaxBreakdownPage() {
                 <AnimatePresence>
                   {revealStep >= 1 && (
                     <motion.div key="it" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-                      <StatCard label="Income Tax" value={fmt(result.tax.incomeTax)} sub="Per year" muted={revealStep < 3} />
+                      <StatCard label="Income Tax" value={fmt(result.tax.incomeTax)} sub="Per year" muted={revealStep >= 3} />
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -1065,7 +1062,7 @@ export default function TaxBreakdownPage() {
                 <AnimatePresence>
                   {revealStep >= 2 && (
                     <motion.div key="ni" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-                      <StatCard label="National Insurance" value={fmt(result.tax.nationalInsurance)} sub="Per year" muted={revealStep < 3} />
+                      <StatCard label="National Insurance" value={fmt(result.tax.nationalInsurance)} sub="Per year" muted={revealStep >= 3} />
                     </motion.div>
                   )}
                 </AnimatePresence>
