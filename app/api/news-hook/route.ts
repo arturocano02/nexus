@@ -19,7 +19,6 @@ async function fetchHeadlines(): Promise<string[]> {
       if (!res.ok) continue;
       const xml = await res.text();
 
-      // Extract <title> tags (skip the first one — it's the feed title)
       const matches = [...xml.matchAll(/<title>(?:<!\[CDATA\[)?([\s\S]+?)(?:\]\]>)?<\/title>/g)];
       const headlines = matches
         .slice(1, 10)
@@ -41,7 +40,7 @@ export async function GET() {
 
   const resp = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 120,
+    max_tokens: 200,
     messages: [
       {
         role: "user",
@@ -49,13 +48,13 @@ export async function GET() {
 
 ${headlineBlock}
 
-Pick the most politically interesting one and write a single conversational opening line (1-2 sentences max) that:
-- Naturally references the story without being formal
-- Ends with a question like "how does that land with you?" or "what do you make of it?" or similar
-- Sounds like a smart, curious friend — not a newsreader
-- Is under 35 words total
+Pick the most politically interesting one and return a JSON object with:
+- "text": a single conversational opening line (under 35 words) that naturally references the story and ends with a question like "how does that land with you?" — sounds like a smart curious friend, not a newsreader
+- "topic": the political topic category e.g. "Housing"
+- "headline": the exact headline you chose from the list
+- "context": 2-3 plain English sentences explaining what this story is about and why it matters, written for someone who hasn't been following the news
 
-Return ONLY a JSON object: {"text":"your opening line","topic":"the political topic name e.g. Housing"}`,
+Return ONLY valid JSON: {"text":"...","topic":"...","headline":"...","context":"..."}`,
       },
     ],
   });
@@ -66,13 +65,19 @@ Return ONLY a JSON object: {"text":"your opening line","topic":"the political to
     const e = raw.lastIndexOf("}");
     const parsed = JSON.parse(raw.slice(s, e + 1));
     if (parsed.text) {
-      return NextResponse.json({ text: parsed.text, topic: parsed.topic ?? null });
+      return NextResponse.json({
+        text: parsed.text,
+        topic: parsed.topic ?? null,
+        headline: parsed.headline ?? null,
+        context: parsed.context ?? null,
+      });
     }
   } catch { /* fall through */ }
 
-  // Fallback
   return NextResponse.json({
     text: "The government is taking a lot of heat right now — what issue do you think they're getting most wrong?",
     topic: null,
+    headline: null,
+    context: null,
   });
 }

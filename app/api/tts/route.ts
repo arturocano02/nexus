@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const VOICE_ID = "XrExE9yKIg1WjnnlVkGX";
+const VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "XrExE9yKIg1WjnnlVkGX";
 
 export async function POST(req: NextRequest) {
   const { text } = await req.json();
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   }
 
   const res = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}?output_format=mp3_44100_128`,
     {
       method: "POST",
       headers: {
@@ -26,15 +26,14 @@ export async function POST(req: NextRequest) {
         "xi-api-key": apiKey,
       },
       body: JSON.stringify({
-        text: text.slice(0, 1000), // cap length
+        text: text.slice(0, 1000),
         model_id: "eleven_multilingual_v2",
-        output_format: "mp3_44100_128",
         voice_settings: {
           stability: 0.42,
           similarity_boost: 0.82,
           style: 0.0,
           use_speaker_boost: true,
-          speed: 1.12, // fast but clear
+          speed: 1.12,
         },
       }),
     }

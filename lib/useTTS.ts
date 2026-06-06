@@ -3,57 +3,112 @@
 import { useRef, useState, useCallback } from "react";
 
 export function useTTS() {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const objectUrlRef = useRef<string | null>(null);
+  // Per-component AudioContext stored in a ref so it survives re-renders
+  // but is created fresh per component mount (no HMR / module-level issues)
+  const ctxRef = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const fetchingRef = useRef(false); // prevents double-calls while a fetch is in flight
   const [speaking, setSpeaking] = useState(false);
 
+  function getOrCreateCtx(): AudioContext {
+    if (!ctxRef.current) {
+      const Ctor =
+        window.AudioContext ??
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
+      ctxRef.current = new Ctor();
+      console.log("[tts] AudioContext created, state:", ctxRef.current.state);
+    }
+    return ctxRef.current;
+  }
+
+  // Call this synchronously inside a user-gesture handler to unlock audio
+  const unlock = useCallback(() => {
+    const ctx = getOrCreateCtx();
+    console.log("[tts] unlock() called, ctx state:", ctx.state);
+    if (ctx.state === "suspended") {
+      ctx.resume().then(() =>
+        console.log("[tts] AudioContext resumed →", ctx.state)
+      );
+    }
+  }, []);
+
   const stop = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.onended = null;
-      audioRef.current = null;
+    fetchingRef.current = false;
+    try {
+      sourceRef.current?.stop();
+    } catch {
+      /* already stopped */
     }
-    if (objectUrlRef.current) {
-      URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = null;
-    }
+    sourceRef.current = null;
     setSpeaking(false);
   }, []);
 
-  const speak = useCallback(async (text: string) => {
-    stop();
-    if (!text.trim()) return;
-    if (!process.env.NEXT_PUBLIC_ELEVENLABS_ENABLED) {
-      // Silently no-op if TTS not configured — avoids error spam
-    }
+  const speak = useCallback(
+    async (text: string) => {
+      if (fetchingRef.current) {
+        console.log("[tts] already fetching, ignoring duplicate call");
+        return;
+      }
+      stop();
+      if (!text?.trim()) {
+        console.log("[tts] speak() called with empty text, skipping");
+        return;
+      }
+      console.log("[tts] speak() called, text length:", text.length);
+      fetchingRef.current = true;
+      setSpeaking(true);
 
-    setSpeaking(true);
-    try {
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      if (!res.ok) { setSpeaking(false); return; }
+      try {
+        // Fetch audio from our API
+        const res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        console.log("[tts] /api/tts response:", res.status, res.ok);
+        if (!res.ok) {
+          const err = await res.text();
+          console.error("[tts] API error:", err);
+          setSpeaking(false);
+          return;
+        }
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      objectUrlRef.current = url;
+        const arrayBuf = await res.arrayBuffer();
+        console.log("[tts] arrayBuffer size:", arrayBuf.byteLength);
 
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.onended = () => {
+        const ctx = getOrCreateCtx();
+        console.log("[tts] AudioContext state before decode:", ctx.state);
+
+        if (ctx.state === "suspended") {
+          await ctx.resume();
+          console.log("[tts] resumed, new state:", ctx.state);
+        }
+
+        const audioBuf = await ctx.decodeAudioData(arrayBuf.slice(0));
+        console.log("[tts] decoded, duration:", audioBuf.duration);
+
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuf;
+        source.connect(ctx.destination);
+        source.onended = () => {
+          console.log("[tts] playback ended");
+          fetchingRef.current = false;
+          setSpeaking(false);
+          sourceRef.current = null;
+        };
+        sourceRef.current = source;
+        fetchingRef.current = false; // fetch done, now playing
+        source.start(0);
+        console.log("[tts] source.start(0) called ✓");
+      } catch (e) {
+        console.error("[tts] error in speak():", e);
+        fetchingRef.current = false;
         setSpeaking(false);
-        URL.revokeObjectURL(url);
-        objectUrlRef.current = null;
-        audioRef.current = null;
-      };
-      audio.onerror = () => { setSpeaking(false); };
-      await audio.play();
-    } catch {
-      setSpeaking(false);
-    }
-  }, [stop]);
+      }
+    },
+    [stop]
+  );
 
-  return { speak, stop, speaking };
+  return { speak, stop, speaking, unlock };
 }

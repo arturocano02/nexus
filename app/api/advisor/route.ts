@@ -72,6 +72,7 @@ function buildSystemPrompt(
   advisorName: string,
   userViews: { topic_label: string; summary: string; confidence_score: number }[],
   arenaContext?: { topic: string; for_args: string[]; against_args: string[] },
+  newsContext?: string | null,
 ): string {
   const viewsBlock = userViews.length > 0
     ? `\nESTABLISHED USER VIEWS (confirmed, non-deleted — use for spotting genuine contradictions only):\n${
@@ -85,22 +86,20 @@ function buildSystemPrompt(
 
   const TAXONOMY_CATEGORIES = ["Economy", "Healthcare", "Housing", "Education", "Immigration", "Climate & Environment", "Technology & AI", "Defence & Foreign Affairs", "Democracy & Governance", "Crime & Justice", "Social Policy", "Transport & Infrastructure"];
 
-  return `You are ${advisorName}, a debate sparring partner. Sharp, funny, direct. You never lecture. You never waffle. Short punchy replies. You push back hard on every position. You always end with a specific question or provocation. No em-dashes. Plain English only. Cite real sources inline: [ONS](https://ons.gov.uk). If they're vague, call it out and make them be specific. If they say something interesting, say so briefly then hit back harder.
-${viewsBlock}${arenaBlock}
-TOPIC TAGS: Only use these exact names as topic_tags, 1-3 max: ${TAXONOMY_CATEGORIES.join(", ")}.
+  const newsBlock = newsContext
+    ? `\nNEWS CONTEXT (use this to explain the topic if the user seems confused or asks what it's about): ${newsContext}\nIf the user says they don't know, haven't heard of it, asks what it means, or seems lost — give them a plain 2-sentence explainer of this context FIRST, then ask your question. If they ask how Nexus or this app works, answer that instead.\n`
+    : "";
 
-VIEW INFERENCE: When the user clearly takes a position, restate it briefly ("So you think X — right?") and mark in belief_updates on confirmation.
+  return `You are ${advisorName}. Spartan. Ruthless. Never waffle. Max 2 sentences then one sharp question. No preamble, no affirmations, no em-dashes. Hit the weakest point in their argument. Cite a real figure or source if it helps. Plain English only.
+${viewsBlock}${arenaBlock}${newsBlock}
+TOPIC TAGS: ${TAXONOMY_CATEGORIES.join(", ")} — pick 1-2 max.
 
-CONFIDENCE SCORING for belief_updates:
-- 0.8–1.0: stated clearly and defended with reasons
-- 0.5–0.7: stated but uncertain or qualified ("I think", "maybe")
-- 0.3–0.5: vague, hedged, or partially contradicted
-- 0.1–0.3: highly uncertain, contradictory, or just speculating
+VIEW INFERENCE: When the user takes a clear position, confirm it briefly then log it. belief_updates confidence: 0.8+ = clearly stated with reasons; 0.5-0.7 = stated but hedged; below 0.5 = vague or contradictory.
 
-RESPONSE FORMAT: Valid JSON only. No text outside it. Max 80 words in message field.
-{"message":"reply (max 80 words, no em-dashes)","topic_tags":["Category"],"belief_updates":[{"topic_label":"label","summary":"one sentence","confidence_score":0.0,"raw_excerpt":"exact user quote","confirmation_status":"inferred"}]}
+RESPONSE FORMAT: Valid JSON only. No text outside it. Max 45 words in message.
+{"message":"reply (max 45 words, no em-dashes)","topic_tags":["Category"],"belief_updates":[{"topic_label":"label","summary":"one sentence","confidence_score":0.0,"raw_excerpt":"exact user quote","confirmation_status":"inferred"}]}
 
-belief_updates only when you have real signal. Empty array otherwise. confirmation_status "confirmed" only when user explicitly agrees.`;
+belief_updates only on real signal. Empty array otherwise. confirmation_status "confirmed" only when user explicitly agrees.`;
 }
 
 async function buildOpeningQuestion(
@@ -172,6 +171,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json() as {
     message: string | null;
     initial_topic?: string;
+    news_context?: string | null;
     arena_context?: { topic: string; for_args: string[]; against_args: string[] };
   };
 
@@ -261,13 +261,13 @@ export async function POST(req: NextRequest) {
     content: m.content,
   }));
 
-  const systemPrompt = buildSystemPrompt(advisorName, userViews, body.arena_context);
+  const systemPrompt = buildSystemPrompt(advisorName, userViews, body.arena_context, body.news_context);
 
   let apiResponse: AdvisorApiResponse;
   try {
     const resp = await anthropic.messages.create({
       model: MODEL,
-      max_tokens: 500,
+      max_tokens: 300,
       system: systemPrompt,
       messages: anthropicMessages,
     });

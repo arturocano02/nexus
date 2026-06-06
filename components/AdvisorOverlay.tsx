@@ -250,6 +250,7 @@ export default function AdvisorOverlay({
   const [newsLoading, setNewsLoading] = useState(false);
   const [initiated, setInitiated] = useState(false);
   const [newsTopic, setNewsTopic] = useState<string | null>(null);
+  const [newsContext, setNewsContext] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -266,6 +267,7 @@ export default function AdvisorOverlay({
       setInput("");
       setNewsLoading(false);
       setNewsTopic(null);
+      setNewsContext(null);
       tts.stop();
       speech.stop();
     }
@@ -327,6 +329,7 @@ export default function AdvisorOverlay({
         body: JSON.stringify({
           message: userMessage,
           initial_topic: newsTopic ?? initialTopic,
+          news_context: newsContext,
           arena_context: arenaContext,
         }),
       });
@@ -359,22 +362,25 @@ export default function AdvisorOverlay({
 
   // ── "I'll start" handler ──────────────────────────────────────────────────
   function handleUserStarts() {
+    tts.unlock(); // unlock AudioContext in user-gesture handler
     setPhase("chat");
     setMode("voice");
-    // Auto-start mic after sheet animation settles
     setTimeout(() => speech.start(), 500);
   }
 
   // ── "AI starts" handler ───────────────────────────────────────────────────
   async function handleAIStarts() {
+    tts.unlock(); // unlock AudioContext in user-gesture handler
     setNewsLoading(true);
     try {
       const res = await fetch("/api/news-hook");
       const data = await res.json();
       const openingText: string = data.text;
       const topic: string | null = data.topic ?? null;
+      const context: string | null = data.context ?? null;
 
       setNewsTopic(topic);
+      setNewsContext(context);
       setMessages([{
         role: "assistant",
         content: openingText,
@@ -386,9 +392,9 @@ export default function AdvisorOverlay({
       setPhase("chat");
       setMode("voice");
 
-      // Speak the opening
+      // Small delay so React state settles before playing audio
       if (!muted) {
-        tts.speak(openingText);
+        setTimeout(() => tts.speak(openingText), 120);
       }
     } catch {
       // Fallback to normal opening
@@ -429,6 +435,8 @@ export default function AdvisorOverlay({
 
   const isListening = mode === "voice" && speech.listening;
   const lastAIMsg = [...messages].reverse().find(m => m.role === "assistant" && m.content !== "__thinking__");
+  const sessionHasUserMessage = messages.some(m => m.role === "user");
+  const displaySubmitCount = sessionHasUserMessage ? unsubmittedCount : 0;
 
   return (
     <AnimatePresence>
@@ -544,16 +552,16 @@ export default function AdvisorOverlay({
               <div className="shrink-0 px-4 pb-2 flex justify-end">
                 <button
                   onClick={() => { onOpenManifesto?.(); onClose(); }}
-                  className={unsubmittedCount > 0 ? "submit-pill-pulse" : ""}
+                  className={displaySubmitCount > 0 ? "submit-pill-pulse" : ""}
                   style={{
                     borderRadius: 999, padding: "5px 14px", fontSize: 12, fontWeight: 500,
-                    border: unsubmittedCount > 0 ? "1px solid rgba(255,191,0,0.5)" : "1px solid rgba(255,255,255,0.08)",
-                    background: unsubmittedCount > 0 ? "rgba(255,191,0,0.12)" : "transparent",
-                    color: unsubmittedCount > 0 ? "#FFBF00" : "rgba(245,245,245,0.18)",
+                    border: displaySubmitCount > 0 ? "1px solid rgba(255,191,0,0.5)" : "1px solid rgba(255,255,255,0.08)",
+                    background: displaySubmitCount > 0 ? "rgba(255,191,0,0.12)" : "transparent",
+                    color: displaySubmitCount > 0 ? "#FFBF00" : "rgba(245,245,245,0.18)",
                     cursor: "pointer", transition: "all 0.3s", whiteSpace: "nowrap",
                   }}
                 >
-                  Submit views{unsubmittedCount > 0 ? ` (${unsubmittedCount})` : ""}
+                  Submit views{displaySubmitCount > 0 ? ` (${displaySubmitCount})` : ""}
                 </button>
               </div>
             )}
@@ -593,23 +601,27 @@ export default function AdvisorOverlay({
                     <VoiceBlob isActive={isListening} isSpeaking={tts.speaking} />
                   </div>
 
-                  {/* Transcript + last AI response */}
+                  {/* AI message + user transcript */}
                   <div
                     ref={voiceScrollRef}
-                    className="flex-1 min-h-0 overflow-y-auto w-full text-center space-y-3 scrollbar-hide"
+                    className="flex-1 min-h-0 overflow-y-auto w-full text-center space-y-4 scrollbar-hide"
                   >
-                    {speech.interim && (
-                      <p className="text-sm italic px-2" style={{ color: "rgba(255,191,0,0.75)" }}>
-                        {speech.interim}
-                      </p>
-                    )}
-                    {lastAIMsg && (
-                      <p className="text-sm leading-relaxed px-2" style={{ color: "rgba(245,245,245,0.82)" }}>
+                    {/* AI text — stays visible until AI is generating its next reply */}
+                    {lastAIMsg && !loading && (
+                      <motion.p
+                        key={lastAIMsg.timestamp}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="text-sm leading-relaxed px-2"
+                        style={{ color: "rgba(245,245,245,0.88)" }}
+                      >
                         {renderMessage(lastAIMsg.content)}
-                      </p>
+                      </motion.p>
                     )}
-                    {loading && !lastAIMsg && (
-                      <div className="flex justify-center gap-1.5 py-2">
+
+                    {/* Thinking dots — replace AI text while generating */}
+                    {loading && (
+                      <div className="flex justify-center gap-1.5 py-1">
                         {[0, 1, 2].map(j => (
                           <motion.div key={j} className="w-1.5 h-1.5 rounded-full"
                             style={{ background: "rgba(255,191,0,0.5)" }}
@@ -617,6 +629,13 @@ export default function AdvisorOverlay({
                             transition={{ duration: 1, repeat: Infinity, delay: j * 0.2 }} />
                         ))}
                       </div>
+                    )}
+
+                    {/* User's live interim speech — shown below AI text */}
+                    {speech.interim && !loading && (
+                      <p className="text-xs italic px-2" style={{ color: "rgba(255,191,0,0.6)" }}>
+                        {speech.interim}
+                      </p>
                     )}
                   </div>
 
