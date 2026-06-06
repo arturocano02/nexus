@@ -32,10 +32,20 @@ function ProfileIcon({ active }: { active: boolean }) {
     </svg>
   );
 }
+function TaxIcon({ active }: { active: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}
+      className={`w-6 h-6 ${active ? "text-amber" : "text-secondary/70"}`}>
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <path d="M8 12h8M8 8h4M8 16h5" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 const items = [
   { href: "/your-view", label: "View", Icon: HomeIcon },
   { href: "/arena", label: "Arena", Icon: ArenaIcon },
+  { href: "/tax-breakdown", label: "Taxes", Icon: TaxIcon },
   { href: "/profile", label: "Profile", Icon: ProfileIcon },
 ];
 
