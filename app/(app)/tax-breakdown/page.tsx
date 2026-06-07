@@ -11,6 +11,7 @@ interface TaxResult {
   incomeTax: number;
   nationalInsurance: number;
   totalCentralContribution: number;
+  studentLoanRepayment: number;
   belowThreshold: boolean;
 }
 
@@ -42,10 +43,31 @@ interface PageResult {
 }
 
 // ---------------------------------------------------------------------------
+// Student loan plans (2024/25 thresholds)
+// ---------------------------------------------------------------------------
+
+export type StudentLoanPlan = "" | "plan1" | "plan2" | "plan4" | "plan5" | "postgrad";
+
+const STUDENT_LOAN_PLANS: { value: StudentLoanPlan; label: string; threshold: number; rate: number }[] = [
+  { value: "plan1",   label: "Plan 1 — pre-2012 (England/Wales/NI)",  threshold: 24990, rate: 0.09 },
+  { value: "plan2",   label: "Plan 2 — post-2012 (England/Wales)",     threshold: 27295, rate: 0.09 },
+  { value: "plan4",   label: "Plan 4 — Scotland",                      threshold: 31395, rate: 0.09 },
+  { value: "plan5",   label: "Plan 5 — from 2023 entry (England)",     threshold: 25000, rate: 0.09 },
+  { value: "postgrad",label: "Postgraduate Loan",                       threshold: 21000, rate: 0.06 },
+];
+
+function calcStudentLoan(grossSalary: number, plan: StudentLoanPlan): number {
+  if (!plan) return 0;
+  const p = STUDENT_LOAN_PLANS.find((x) => x.value === plan);
+  if (!p || grossSalary <= p.threshold) return 0;
+  return Math.round((grossSalary - p.threshold) * p.rate);
+}
+
+// ---------------------------------------------------------------------------
 // Tax calculation
 // ---------------------------------------------------------------------------
 
-function calculateTax(grossSalary: number): TaxResult {
+function calculateTax(grossSalary: number, studentLoanPlan: StudentLoanPlan = ""): TaxResult {
   const belowThreshold = grossSalary <= 12570;
   let incomeTax = 0;
   if (grossSalary > 125140) {
@@ -71,6 +93,7 @@ function calculateTax(grossSalary: number): TaxResult {
     incomeTax: Math.round(incomeTax),
     nationalInsurance: Math.round(nationalInsurance),
     totalCentralContribution: Math.round(incomeTax + nationalInsurance),
+    studentLoanRepayment: calcStudentLoan(grossSalary, studentLoanPlan),
     belowThreshold,
   };
 }
@@ -804,6 +827,7 @@ type RevealStep = 0 | 1 | 2 | 3 | 4 | 5;
 export default function TaxBreakdownPage() {
   const [salary, setSalary] = useState("");
   const [postcode, setPostcode] = useState("");
+  const [studentLoanPlan, setStudentLoanPlan] = useState<StudentLoanPlan>("");
   const [loading, setLoading] = useState(false);
   const [postcodeError, setPostcodeError] = useState("");
   const [salaryError, setSalaryError] = useState("");
@@ -845,7 +869,7 @@ export default function TaxBreakdownPage() {
         council.authorityName = adminDistrict;
       }
 
-      const tax = calculateTax(salaryNum);
+      const tax = calculateTax(salaryNum, studentLoanPlan);
 
       const centralItems: SpendingItem[] = CENTRAL_SPENDING_BASE.map((b) => ({
         ...b,
@@ -875,7 +899,7 @@ export default function TaxBreakdownPage() {
     } finally {
       setLoading(false);
     }
-  }, [salary, postcode]);
+  }, [salary, postcode, studentLoanPlan]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -994,6 +1018,37 @@ export default function TaxBreakdownPage() {
               </button>
             </div>
           </div>
+
+          {/* Student loan — optional second row */}
+          <div className="pt-2 border-t" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
+            <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+              <div className="space-y-1 flex-1 max-w-sm">
+                <label className="text-[9px] tracking-[0.3em] uppercase font-bold text-white/40 block">
+                  Student loan plan <span className="text-white/25 normal-case tracking-normal font-normal">(optional)</span>
+                </label>
+                <select
+                  value={studentLoanPlan}
+                  onChange={(e) => setStudentLoanPlan(e.target.value as StudentLoanPlan)}
+                  className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none border appearance-none cursor-pointer"
+                  style={{
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    color: studentLoanPlan ? "rgba(245,245,245,0.9)" : "rgba(245,245,245,0.3)",
+                  }}
+                >
+                  <option value="" style={{ background: "#050526" }}>None / not applicable</option>
+                  {STUDENT_LOAN_PLANS.map((p) => (
+                    <option key={p.value} value={p.value} style={{ background: "#050526" }}>{p.label}</option>
+                  ))}
+                </select>
+              </div>
+              {studentLoanPlan && (
+                <p className="text-[11px] text-white/35 pb-2.5">
+                  Repay {STUDENT_LOAN_PLANS.find(p => p.value === studentLoanPlan)?.rate === 0.06 ? "6%" : "9%"} of earnings above £{STUDENT_LOAN_PLANS.find(p => p.value === studentLoanPlan)?.threshold.toLocaleString("en-GB")}
+                </p>
+              )}
+            </div>
+          </div>
         </motion.div>
 
         {/* Loading skeleton */}
@@ -1063,6 +1118,20 @@ export default function TaxBreakdownPage() {
                   {revealStep >= 2 && (
                     <motion.div key="ni" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
                       <StatCard label="National Insurance" value={fmt(result.tax.nationalInsurance)} sub="Per year" muted={revealStep >= 3} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Student loan — appears at step 2 alongside NI, dimmed until step 3 */}
+                <AnimatePresence>
+                  {revealStep >= 2 && result.tax.studentLoanRepayment > 0 && (
+                    <motion.div key="sl" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.1 }}>
+                      <StatCard
+                        label={`Student Loan (${STUDENT_LOAN_PLANS.find(p => p.value === studentLoanPlan)?.label.split(" — ")[0] ?? ""})`}
+                        value={fmt(result.tax.studentLoanRepayment)}
+                        sub="Per year"
+                        muted={revealStep >= 3}
+                      />
                     </motion.div>
                   )}
                 </AnimatePresence>
